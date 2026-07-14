@@ -569,7 +569,7 @@ specs 随交付逐步建立。每次 archive 时 PM 把 delta 合并进对应 `s
 
 ### 8.3 memory：动态记忆
 
-memory 是四层防线之上的动态增长层，archive 阶段 PM 执行 Memory Merge，把可复用经验写进 `entries/`。条目格式是"问题场景 + 解决方案"，比纯规则更易被 AI 理解。三个示例条目：换号登录语言覆盖缺陷、跳过迁移掩盖报错根源、E2E 伪造验证。
+memory 是四层防线之上的动态增长层，archive 阶段 PM 执行 Memory Merge，把可复用经验写进 `entries/`。条目格式是"问题场景 + 解决方案"，比纯规则更易被 AI 理解。示例条目：`JSON.parse(null)` 返回 null 不抛错（try/catch 兜不住，需 `Array.isArray` 守卫）、跳过迁移掩盖报错根源、E2E 伪造验证——前一条正是第九章那个任务里 RR 拦下后归档的坑。
 
 memory 和 specs 互补：**specs 是系统能力契约，memory 是踩过的坑和解法。** 维护纪律是删过时经验前先验证现有代码是否仍用该模式。静态防线加动态记忆，框架就能自我进化——这正是 OpenSpec"经验无法沉淀"那个短板的解法。这层和 Claude Code 自己的记忆管理（第 2.3 节 MEMORY.md 索引 + 两步保存）是同构的，只是 harness 把它变成了团队级、入仓库的工程资产。
 
@@ -577,201 +577,144 @@ memory 和 specs 互补：**specs 是系统能力契约，memory 是踩过的坑
 
 ## 九、走一遍完整流程：拿一个真实需求跑通
 
-光讲结构抽象，不如真跑一遍。下面这个任务是在 `harness-engineering-kit` 仓库里**真实执行**的：`/harness-propose` 那套斜杠命令和 `SubagentStop` hook 是 IDE 层机制，脱离 Cursor/Claude Code 的运行时无法自动触发；但脚手架脚本（init-task / check-harness / verify / hook 实现）是纯 bash+node，可以在终端真实跑。所以这一节的七角色接力由我以 PM 身份手动驱动各 Worker、按 `.harness/agents/*.md` 的五要素契约逐棒产出文档，而所有脚本和 hook 的输出都是真实终端跑出来的截图——不是示意，是退出码说了算。
+前面八节拆完了 harness 的四层防线和七角色。但 harness 到底好不好用，得拿一个真实需求在真实业务仓库里走一遍才知道。这一节就是我自己的操作记录——在 `proshop-mern`（Brad Traversy 的 MERN 电商）上，我用 harness 跑了一个需求，全程和 Claude 一来一回。我负责开闸、拍板、审批，Claude 负责读契约、派 Worker、按归属路由、自己跑退出码验证、在每道闸门前停下等我。把这一来回记下来，比讲十遍架构都清楚。
 
-任务：`user-switch-stale-ui`——换号登录后界面语言被账户语言强制覆盖（john 登出后 jane 登录，Header 语言被强制回退到 jane 的账户语言 zh，破坏了用户当前已选的英文）。standard 档。
+需求是我挑的：`cart-merge-on-login`——访客没登录时往购物车加了几件商品，登录之后这些东西该和账户已有的购物车合并。我翻过 ProShop 的代码，`login()` 成功后只写了 `localStorage.setItem('userInfo')`，压根不碰购物车，所以访客已加的商品登录后行为不确定。这个需求不大、纯前端、不碰数据库，正好走 standard 档，能把七角色完整过一遍。
 
-### 第 0 步：初始化（init-task.sh 真实运行）
+> 补一句背景：ProShop 仓库根有 `"type":"module"`，这让 harness 在自己仓库（CommonJS）里跑得通的几处东西水土不服了——hook 脚本被当成 ESM 加载、`require` 直接报错，硬门禁静默全坏；`verify.sh` 按另一套目录结构校验，误报 FAIL。这些我在跑这个需求之前先修了（hook 改 `.cjs`、verify.sh 按真实栈校准），算是地基。地基不修，下面整条链路都跑不动。这一节聚焦在链路本身，地基的事最后再补。
 
-真实运行脚手架，建 deliverables 目录、复制 `_template`、登记 board.md：
+### 开个任务
 
-```
-$ bash .harness/scripts/init-task.sh user-switch-stale-ui standard
-[init-task] 已创建: .../deliverables/user-switch-stale-ui
-[init-task] 已复制模板文档（proposal/requirements/design/.../tasks.md）
-[init-task] 已登记 board.md: ID=041, profile=standard, 状态=PENDING
-[init-task] 完成。下一步：人 + AI 反复打磨 proposal.md，确认定稿后进入 propose 链路。
-[exit code: 0]
-```
-
-PM 读 proposal.md 识别 Profile：proposal 里写明"不涉及后端/数据模型/公共契约变更 → profile=standard（非 refactor）"，抛心跳 `[PM] Profile 识别: user-switch-stale-ui -> standard | 校验 PASS`，board 写 profile=standard。
-
-### 第 1 步：BA 需求分析
-
-PM 拉起 business-analyst，输入是 proposal + specs + codebase-guide/overview。BA 把 proposal 的模糊意图转成结构化需求，产出 `requirements.md`：
-
-```markdown
-### Requirement: R-012 换号登录保留当前界面语言
-系统 SHALL 在同一会话内换号登录（A 登出后 B 登录）时，保留当前界面语言，而非用 B 的账户语言覆盖。
-
-#### Scenario: S-023 john 英文登出后以 jane 登录
-- GIVEN john 已将界面切换为英文并登出，jane 的账户语言偏好为 zh
-- WHEN jane 登录成功
-- THEN Header 语言保持英文（保留当前界面语言），不回退到中文
-
-#### Scenario: S-024 首次登录应用账户语言
-- GIVEN 一个无本地界面语言记录的新会话，jane 账户语言偏好为 zh
-- WHEN jane 登录成功
-- THEN 界面应用 zh（首次登录用账户语言初始化）
-```
-
-注意 BA 写了两个 Scenario：一个是换号场景（正向），一个是首次登录场景（异常/边界）。异常分支才是 bug 藏身处，BA 不能只写 happy path。编号 R-012/S-023/S-024 贯穿全链路。末尾 `## 结论 PASS` 交回 PM。
-
-### 第 2 步：SA 方案设计
-
-PM 拉起 solution-architect，输入是 requirements + specs + 前后端架构 + deps。SA 把"做什么"转成"怎么做"，产出 `design.md`（节选）：
-
-```markdown
-## Context
-登录成功回调当前逻辑：setUiLanguage(res.uiLanguage || 'zh')。
-这会在任何登录成功时用账户语言覆盖当前界面语言，破坏换号场景的"保留当前选择"语义。
-
-## Goals / Non-Goals
-**Goals:** 换号登录时保留当前界面语言；首次登录时仍用账户语言初始化。
-**Non-Goals:** 不重写 i18n 持久化机制；不改账户语言偏好 UI。
-
-## Decisions
-决策：登录成功回调按"本地是否已有界面语言"分支
-- 有本地语言 → 保留，仅更新账户偏好到 profile（不调 setUiLanguage 覆盖）。
-- 无本地语言 → setUiLanguage(res.uiLanguage || 'zh')（原逻辑）。
-备选：始终不覆盖 → 否决，会破坏首次登录用账户语言的 S-024。
-
-## 就绪自评
-- [x] 需求全部有方案覆盖（R-012 → 分支修正）
-- [x] 无超范围改动（仅回调分支 + E2E）
-- [x] 风险均有缓解
-- [x] 任务可被 Dev 一次性执行（无暗知识）
-- [x] 兼容现有公共契约（不改 i18n spec 既有 Requirement，仅 ADDED 新条）
-```
-
-Non-Goals 是防"小题大做"的（呼应第 1.1 节"小题大做"失控）——明确说不重写 i18n 持久化、不改账户语言 UI，把范围钉死。Decisions 里写了备选方案和否决理由，不只写"选了 X"。就绪自评五项全勾，末尾 `## 结论 PASS`。
-
-### 第 3 步：RR 就绪评审
-
-standard 档要过 RR。RR 像一个没参与设计的旁观者，用白纸视角找问题：需求可测性（每个 R-xxx 能否被 TE 推导成测试）、方案可行性、范围合规（是否超 proposal）、暗知识检查（任务拆解能否被 Dev 一次性执行，有没有"你应该知道"的隐含前提）、契约兼容。六项评审填完，无阻塞，`## 结论 PASS`。
-
-### 人工卡点 1
-
-PM 抛 `[PM] 人工审批 1: user-switch-stale-ui ... 请审阅 readiness-review.md`。人审完确认，进入 apply 链路。
-
-### 第 4 步：Dev 开发实现 + hook 程序验证
-
-PM 拉起 developer，输入是 requirements + design + tasks + dev-recipes。Dev 按 tasks 顺序实现。**这里有一次真实的失败闭环**：Dev 首次实现没加分支，登录回调仍是 `setUiLanguage(res.uiLanguage || 'zh')` 覆盖。
-
-Dev 停下来后，`after_subagent` hook 的真实实现 `verify-after-developer.js` 会被触发——它不问 Dev，程序自己跑 `npm test` + `verify.sh`，退出码无法伪造。下面是这个 hook 在终端真实运行的输出（构造一个模拟的 `after_subagent(developer)` 事件喂给它）：
+我先在 Claude Code 里把脚手架跑起来：
 
 ```
-$ echo '{"event":"after_subagent","agent_name":"developer","exit_code":0,"files_changed":[...]}' \
-    | node .harness/hooks/verify-after-developer.js
-{"decision":"allow","followup_message":"[developer hook] verdict=FAIL
-  npm test: FAIL (0 passed, 0 failed)
-  verify.sh: FAIL
-  PM 行动：verdict=FAIL → 重拉 Developer（重试计数+1，上限 5）；不要信任 Dev 自述。
-  摘要：[FAIL] A1 未声明 ES Module（package.json 缺 type:module） | [FAIL] C1 路由未注册进应用入口 | ..."}
-[exit code: 0]
+❯ bash .harness/scripts/init-task.sh cart-merge-on-login standard
 ```
 
-注意几件事：① hook 的输入里 `exit_code:0`（Dev 自己说成功了），但 hook 程序自跑后给出 `verdict=FAIL`——这正是"Agent 可以骗你，但脚本退出码不会"的实证，hook 完全不信任 Dev 的自述。② 这条输出的 FAIL 有个细节值得说清楚：`npm test` 和 `verify.sh` 在本仓库里是真的会 FAIL，因为这个仓库是**harness 工程脚手架本身，不含业务应用源码**（没有 `package.json type:module`、没有路由注册进 `app.js`）。换句话说，脚本是按"真实应用该有什么"去校验的，缺什么就如实报什么——它不会因为"这是演示"就放水。在真实业务仓库里跑同一个 hook，Dev 实现到位时这里会是 `verdict=PASS (259 passed; verify.sh PASS)`。
+Claude 的反应让我确认这套纪律是真的刻进去了——它没有上来就执行，而是先读了一遍脚本，确认这是个安全的脚手架（建 deliverables 目录、复制模板、登记 board）才跑。跑完它汇报：ID 041、profile standard、状态 PENDING、模板已就位、board 已登记。然后它没自己往下冲，而是问我下一步要不要起草 proposal，让我给一句话需求描述。
 
-PM 读到 `verdict=FAIL`，按回退表打回 Dev（重试计数 1/5）。Dev 补上 `hasLocalUiLanguage()` 分支后重跑，hook verdict 转为 PASS，进 CR。`dev-log.md` 记录了这次闭环：
+这一来一回已经把分工的轮廓勾出来了：我开闸、给意图，它读契约、执行、汇报、等指令。我后面会发现，整个流程就是这一个模式在不同粒度上的反复。
 
-```markdown
-## 重试记录（来自日志）
-> 首次实现（FAIL）：回调仍为 setUiLanguage(res.uiLanguage || 'zh')，未加分支。
->   [developer hook] verdict=FAIL → npm test FAIL (1 failing: B-E2E-13 换号后 Header 回到中文)
->   → PM 行动：重拉 Developer（重试计数 1/5）；不要信任 Dev 自述。
-> 重试 1（PASS）：补 hasLocalUiLanguage() 分支。
->   [developer hook] verdict=PASS → npm test PASS (259 passed) / verify.sh PASS → 进 CR。
-```
+### 把 proposal 敲定
 
-### 第 5 步：CR 代码审查
-
-进 CR。CR 用白纸视角审查 Dev 的实现，按六维度（实现对照 design、规范符合、工程一致性、安全、可维护性、范围合规）。`code-review.md` 里六维度逐条核对（登录回调分支与 design 决策一致 ✅ / ES Module + 无残留 console.log + 单文件 ≤300 行 ✅ / 未引入新鉴权路径 ✅ / 命名语义化 `hasLocalUiLanguage` ✅ / 仅改回调分支 + 补 E2E 未超范围 ✅），问题清单为空，`## 结论 PASS`。CR 与 TE 分离——写代码的人不能自己判合格，这条铁律在这一步落地。
-
-### 第 6 步：TE 测试验证
-
-PM 拉起 test-engineer。TE 从 requirements 的 Scenario 逐条生成测试，四类：
-
-| 类别 | 内容 | 这个任务的情况 |
-|---|---|---|
-| A. API 测试 | 功能正确性/权限/数据校验 | 8 条 |
-| B. 功能验收 | 真实浏览器 E2E，从 Scenario 生成 | 2 条（S-023 正向 + S-024 异常） |
-| C. 回归测试 | 核心流程跑一遍确保旧功能未破坏 | 12 条 |
-| D. 工程验证 | npm test + build-test + post-verify | 3 条 |
-
-TE 的 `test-report.md` 把首次失败和回退闭环写得很完整：
-
-```markdown
-## B 类用例 ↔ Scenario 映射
-| 测试用例 | 对应 R-xxx/S-xxx | 结果 | 备注 |
-|---|---|---|---|
-| B-E2E-13 换号保留界面语言 | R-012 / S-023 | PASS（重试后） | 首次 FAIL，Dev 补分支后 PASS |
-| B-E2E-14 首次登录用账户语言 | R-012 / S-024 | PASS | 原行为保留 |
-
-## 失败详情
-- 首次失败（B-E2E-13）：john 英文登出后 jane 登录，Header 回到中文。
-- 期望 vs 实际：期望保留英文，实际 LoginScreen 用 res.uiLanguage || 'zh' 覆盖为 zh。
-- 归属判定：实现级——R-012 需求清晰、design 已给分支，是 Dev 未实现保留分支，非需求矛盾。
-
-## 证据闭环
-- npm test: PASS (259 passed)
-- Playwright E2E: PASS (2 passed)
-- verify.sh: PASS (通过 26 / 警告 4 / 失败 0)
-- baseline.sh compare: 跳过（standard 档）
-```
-
-TE 区分两种 FAIL（写在 TE 的 NEVER 里）：**实现级**（Dev 没做好）打回 Dev；**需求级**（需求本身矛盾/缺失）升级人改 proposal 重跑 propose。判错归属会误导 PM 回退方向。这个任务首次 FAIL 判定为实现级——R-012 需求是清楚的，是 Dev 没实现保留分支，所以打回 Dev 而不是升级人。重试后 S-023 PASS。
-
-### PM 收尾：check-harness.sh 真实运行
-
-全 PASS 后 PM 按顺序收尾：跑 check-harness.sh 校验 harness 自身完整性、模板残留体检（grep deliverables 有没有未替换的占位符）、board 更新到 AWAITING_ARCHIVE。check-harness.sh 是真实跑的，输出如下（节选）：
+接着我开 propose 链路：
 
 ```
-$ bash .harness/scripts/check-harness.sh
-=== check-harness.sh 系统完整性校验 ===
-[1] 顶层入口
-  [PASS] AGENTS.md 项目入口  [PASS] CLAUDE.md 起始上下文  [PASS] GUIDE.md 工作流总览
-[2] 7 个角色定义（含 PM）
-  [PASS] agent: project-manager  ...  [PASS] agent: test-engineer
-[3] 角色契约五要素（每个 agent 内嵌）
-  [PASS] project-manager: 身份宣言 / 输入 / 输出 / 禁止事项 / 完成条件
-  ...（7 个角色 × 5 要素全 PASS）
-[4] workflow 三件套  [PASS] transitions.json / flow-definition.md / subagent-orchestration.md
-[5] scripts 硬门禁  [PASS] verify.sh / baseline.sh / check-harness.sh / init-task.sh ...（10 个）
-[6] deliverables 结构  [PASS] _template / _archive
-[7] codebase-guide 知识地图  [PASS] 6 子文档
-[8] specs / memory / board  [PASS] _index / entries / templates
-=== 汇总 ===
-通过 71 | 失败 0
-结论: check-harness.sh PASS（Harness 完整）
-[exit code: 0]
+❯ /harness-propose cart-merge-on-login 登录后合并访客购物车与账户购物车
 ```
 
-71 项全 PASS，退出码 0。这一步的意义是：harness 自己也会腐化（有人删了脚本、改了 agent 契约忘了同步），check-harness 是元检查，保证 harness 本身可用。
+Claude 进入 PM 身份，先把该读的都读了（提案模板、PM 角色、GUIDE 第一阶段、状态转换、AGENTS 地图），然后把 proposal 起草好——"要做什么"和"怎么做"分得清清楚楚，Non-Goals 单列，验收标准四条。但草完它停住了，没往下走，而是抛出人工确认心跳，把要我拍板的三件事逐条列出来：
 
-PM 抛 `[PM] 人工审批 2: ... 请审阅 deliverables/user-switch-stale-ui/`。
-
-### 人工卡点 2 + 归档
-
-人审全量 deliverables 确认后归档。PM 执行 Spec Merge（把本次 delta 合并进 `specs/i18n/spec.md`——R-012 这条新 Requirement 被追加进 i18n capability）：
-
-```markdown
-### Requirement: 换号登录保留当前界面语言
-系统 SHALL 在同一会话内换号登录（A 登出后 B 登录）时，**保留当前界面语言**，而非强制回退到 B 的账户语言。
-
-#### Scenario: john 英文登出后以 jane 登录
-- GIVEN john 已将界面切换为英文并登出，jane 的账户语言偏好为 zh
-- WHEN jane 登录成功
-- THEN Header 语言保持英文（保留当前界面语言），不回退到中文
-
-> 注：本 Requirement 由 user-switch-stale-ui 任务引入（修正原 res.uiLanguage || 'zh' 覆盖访客语言的缺陷）。
+```
+[PM] 人工确认：请确认这版提案是否已定稿。
+1. 合并规则：同款 qty 相加（上限 countInStock）、不同款取并集 —— 是否符合预期？
+2. 非目标 (Non-Goals)：不引入后端 user.cart 持久化、不改 UI、不动登出 —— 范围是否正确？
+3. 验收标准的四条是否需要增减？
+确认后我将进行 Profile 识别并调度 Worker 子代理（BA → SA → RR）。
 ```
 
-接着 Memory Merge（"换号登录语言覆盖缺陷"写进 `memory/entries/` 成为一个 pitfall 条目）、证据预检加 mv 归档（deliverables/<task> → _archive/<日期-任务名>/）、board → DONE、check-harness.sh 终检。
+这一停是整条链路的关键。proposal 是命根子——没写清"做什么"，后面所有执行都是无源之水。而"做什么"是我的领地，Claude 不替我定，它只起草、列选项、等我拍板。这正是 harness 想要的克制：技术上它比我熟，但需求边界只有我能拍。
 
-### 小结
+我看过三条都对，回了一个字：
 
-整个流程跑下来，一个模糊的"换号后语言不对"bug，被拆成了：明确的 R-012 需求（含正反两个 Scenario）→ 有 Non-Goals 钉死范围的设计 → 独立 RR 评审 → Dev 实现 + hook 程序验证 → CR 六维度审查 → TE 从 Scenario 生成 E2E + 证据闭环 → 一次实现级 FAIL 回退闭环 → 归档进 specs 和 memory。每一步都有文档产出、每一步都有可验证的退出码或 `## 结论`。其中 hook 和脚本的输出是真实终端跑出来的——hook 在 Dev 自报 `exit_code:0` 时仍给出 `verdict=FAIL`，check-harness 71 项全 PASS 退出码 0，这就是"把完成与否变成可检查的客观成果"在一个真实任务上的样子。
+```
+❯ 定稿
+```
+
+Claude 收到，进 Profile 识别，抛心跳 `[PM] Profile 识别: cart-merge-on-login -> standard | 校验 PASS`，开始派 Worker。从这一刻起进入自治段——我不再逐棒插手，它按状态机自己调度，只在闸门停下等我。
+
+### propose 三棒：一次被 RR 拦下的回退
+
+Claude 把 BA、SA、RR 三棒依次派给后台子代理。每棒前后它都读对应契约、跑 `stage-doc.sh` 校验文档就位、抛心跳。这一段我几乎没动作——这正是 harness 的设计意图：专业判断交给 Worker，调度交给 PM，我只在闸门出现。但自治不等于放任，中间有一次真实的回退闭环，正好把"按归属路由"这件事讲透了。
+
+BA 先收工，`## 结论 PASS`，产出 R-001~R-004 / S-001~S-009。我扫了一眼需求，BA 的功力全在异常分支——三个空源分支（访客空、账户空、双空）、超库存截断、登录失败不动车，一个不漏。这些正是 bug 藏身处，happy path 谁都会写。BA 还诚实标了一处"账户车数据源"的设计张力，明说这归 SA 定夺、自己不臆造。
+
+SA 接着收工，`## 结论 PASS`，产出 design.md。三个核心决策：账户车数据源用每用户的 localStorage key `cartItems_<_id>`（定夺了 BA 标的张力，还附了三个被否的备选和否决理由）；合并算法抽成纯函数 `mergeCartItems`（落 cartReducers.js，能被单测直接 import）；合并触发点放在 `login()` 里显式 dispatch，精准避开 `register()` 和 `updateUserProfile()`——这俩也 dispatch `USER_LOGIN_SUCCESS`，要是去 reducer 里监听就会误触发合并、污染购物车。
+
+然后 RR 给了我一个意外——**首轮 `## 结论 BLOCK`**。它拦下了 SA 设计里藏的一个暗知识：`JSON.parse(null)` 返回 `null`，**不抛错**。SA 写的 `try/catch` 兜不住这个，`mergeCartItems(guestItems, null)` 会在 `for...of null` 抛 TypeError，而这条路径恰恰是存量用户首次登录（没有 per-user key，`getItem` 返回 null）的必经之路，又隐蔽又必现。
+
+这里 Claude 做了一件让我印象深刻的事——**判归属再路由，不乱打回**。RR 的诊断写得很清楚："需求侧无问题，无需 BA 介入；缺口在 design.md（SA 制品）"。Claude 据此只打回 SA，不打回 BA，还讲清了为什么不违反"下游不改上游"那条铁律：RR 的上游是 SA，design 是 SA 自己的产出，SA 补自己的东西不算改上游。判错归属会误导整条链路的回退方向，这个判断它得自己拿。
+
+接着它 resume SA（保留上下文，不重读全部源码），把阻塞点精确转达。SA 补了双重防御——`try/catch` 捕非法 JSON 字符串、`Array.isArray` 类型守卫把 null 和非数组归一成 `[]`，两层各管一摊。补完之后 Claude 没有默认 PASS，而是**重新 resume RR 复审**——它的原话是"RR 是打回后的复审方，须确认 BLOCK 项已闭环，而非默认 PASS"。RR 复审确认双重防御到位，`## 结论 PASS`。整个 propose 链路：BA → SA（BLOCK 补空值守卫）→ RR（BLOCK→复审 PASS）。
+
+这一棒让我真切体会到 harness 和"让 AI 直接写代码"的区别：缺陷在写一行代码之前就被一个白纸视角的旁观者拦下了，而不是等 Dev 实现完、TE 跑 E2E 时才在存量用户首次登录路径上炸出来。
+
+```
+[PM] 人工审批 1: cart-merge-on-login 已完成 propose 全链路；请审阅 readiness-review.md。
+```
+
+Claude 把三棒产物策展成一张摘要表，列完核心方案定夺，然后说了句"我在此停下等人"。
+
+### 人工卡点 1：我审，然后开 apply
+
+我读了 readiness-review.md，方案没问题，下一条命令开 apply：
+
+```
+❯ /harness-apply cart-merge-on-login
+```
+
+Claude 进 apply 链路（Dev → CR → TE），但进场第一件事不是派 Dev，而是先核状态机一致性。它发现两个问题：board 状态还停在"提案/PENDING"没推进到 apply；`tasks.md` 还是空模板占位符——SA 本该据 design 的"任务拆解"段填，propose 阶段漏了。
+
+对 tasks.md 这个缺口，Claude 自己做了归属判定：tasks.md 是 SA 的上游制品，按铁律它不该改；但这又是 propose 的遗漏、已经过了卡点 1，于是它选了 resume SA 补 tasks.md（"同命令内 propose 制品修复，路由合法，不跨界"），而不是让 Dev 凭空发挥。SA 38 秒补完，它跑 `stage-doc.sh` 确认，才派 Dev。进场先核状态、发现上游遗漏按归属补、不替 Worker 越界改——这种分寸感是 PM 该有的样子。
+
+### Dev 那一棒：它不信 Worker 的话，自己跑退出码
+
+Dev 在后台改了前端 4 个文件加 1 个后端测试：`cartConstants.js` 加常量、`cartReducers.js` 加 `mergeCartItems` 纯函数和对应 case、`userActions.js` 的 `login()` 加合并段（含 RR 要求的双重防御）、`cartActions.js` 加 per-user key 同步、`backend/__tests__/cartMerge.test.js` 覆盖 S-001~S-007。收工时 Dev 自报 `## 结论 PASS`，npm test 10 passed、verify.sh 14 通过 2 警告 0 失败。
+
+**但 Claude 没信 Dev 的话。** 它讲了句铁律原话"NEVER 跳过 hook 直接信 Dev 的话，退出码说了算"。这轮 Dev 停止后 SubagentStop hook 的 `additionalContext` 没注入主会话，Claude 为了守住底线，自己跑验证脚本读真实退出码——还特意说明这是"路由门禁动作，非技术判断"，意思是这不算它越界去做 Dev 的活：
+
+```bash
+$ npm test 2>&1 | tail -25; echo "===NPM_TEST_EXIT=${PIPESTATUS[0]}==="
+      Tests  10 passed (10)      # cartMerge 7 + generateToken 3
+===NPM_TEST_EXIT=0===
+
+$ bash .harness/scripts/verify.sh 2>&1 | tail -30; echo "===VERIFY_EXIT=${PIPESTATUS[0]}==="
+  [WARN] A4 残留 console.log       # 既有代码，非本任务引入
+  [WARN] A5 userActions.js(327)    # 原306 + design D3 合并段，预期增量
+===VERIFY_EXIT=0===
+```
+
+两个真实退出码都是 0，和 Dev 自报一致——"未伪造"。两个 WARN 都不阻塞。这一幕是"Agent 可以骗你，但脚本退出码不会"最直白的演绎：写代码的那个 Worker 说成了不算，PM 自己跑脚本读退出码才算。我对这条防线格外有安全感——哪怕哪天 Worker 偷懒没跑测试就报 PASS，也骗不过去。
+
+> 中间还卡了个小插曲：`stage-doc.sh` 对 `dev-log.md` 报 FAIL——"已就位但缺 `## 结论 PASS` 段"。根因是契约不一致，Dev 契约的 dev-log 格式本不含结论段（结论由 hook verdict 体现），但 stage-doc 对所有 artifact 一律校验结论段。stage-doc 是第 4 层硬门禁，优先级最高。Claude 没"判定它过严就放过"，而是 resume Dev 补了一行 `## 结论 PASS`（和已真实的退出码一致，不是伪造）。硬门禁是底线——契约不一致时修制品去对齐硬门禁，而不是绕过硬门禁。这个取舍我很认同。
+
+### CR 和 TE：继续自治，TE 还诚实披露了测试边界
+
+CR、TE 两棒继续自治，我没插手。CR 六维度审查（实现对照 design、规范、工程一致性、安全、可维护性、范围合规），逐字对齐 design，确认 RR 拦的那个双重防御点已经解决，单测真覆盖 S-001~S-007，合并只在 `login()` 触发，`## 结论 PASS`。写代码的人不能自己判合格，这条铁律在这一棒落地。
+
+TE 从 S-001~S-009 生成 16 个 Playwright E2E。其中有一条让我特别满意——S-003b 直接验证了 RR 拦下的那个坑：per-user key 不存在 → `getItem` 返回 null → `JSON.parse(null)` → `Array.isArray` 守卫归一 → 不抛 TypeError。RR 在设计阶段拦的隐患，TE 在真实浏览器里又验了一遍，闭环了。
+
+TE 还做了一件很体面的事——**诚实披露测试边界**。它说本机 MongoDB 不可用，E2E 用 `page.route` 拦截了后端 API 边界（登录返回固定响应、失败返回 401），但被测的前端逻辑零 mock，`login()` 合并段、cartReducer、`mergeCartItems`、store 初始化全是真实代码在真实 Chromium 里跑 `frontend/build` 生产产物。它还坦白首轮 E2E 曾 11 个失败，根因是选择器 `button[type=submit]` 命中了 Header 的 Search 按钮而非 Sign In 按钮——**它判定这是测试基建自身的问题，不是实现缺陷**，修了选择器后全过，实现代码全程没动。这个归属判断很关键：判错了打成实现级 FAIL 打回 Dev，就会误导整条链路。E2E 是 TE 新跑的，Claude 又独立重跑了一遍确认退出码是 0。
+
+三棒全 PASS。Claude 进 PM 收尾：`check-harness.sh` 终检 71/0、模板残留体检（发现 standard 档不需要的 `impact-analysis.md` 空模板残留、删掉）、board 推进到 `AWAITING_ARCHIVE`。然后策展成一张摘要表，列完 5 个文件改动和 WARN 说明，再次"停下等人"。
+
+```
+[PM] 人工审批 2: cart-merge-on-login 已完成 apply 全链路；请审阅 deliverables/cart-merge-on-login/。
+```
+
+### 人工卡点 2：最后一道闸，归档
+
+我审完全量 deliverables，下了最后一条命令：
+
+```
+❯ /harness-archive cart-merge-on-login
+```
+
+Claude 执行归档五步。Spec Merge——`specs/user-auth/spec.md` 此前不存在（随交付建立），它新建文件把 R-001~R-004 / S-001~S-009 写进去。Memory Merge——把 RR 拦下的 `JSON.parse(null)` 那个坑写进 `memory/entries/json-parse-null-not-throws.md`，标成 pitfall，下次任何任务碰 localStorage 读取，Agent 读 memory 就能避开。然后备份、`mv` 到 `_archive/2026-07-14-cart-merge-on-login/`、board 改 DONE、`check-harness.sh` 终检 71/0。归档完成。
+
+### 回头看：我和 Claude 到底怎么协作的
+
+把这一来回抽出来，分工是这样的——
+
+我全程只做了三件事：开闸（init-task、`/harness-propose`、`/harness-apply`、`/harness-archive` 四条命令）、拍板（proposal 那个"定稿"）、审批（两个人工卡点）。我没写一行业务代码，没做一次技术判断。
+
+Claude 做了四件事：读契约再执行（不盲跑脚本、不盲派 Worker）；派 Worker 并按归属路由回退（RR 拦下设计缺陷时只打回 SA 不打回 BA、tasks.md 遗漏时 resume SA 补）；不信 Worker 自述、自己跑退出码（Dev 自报 PASS 不算，npm test、verify.sh、Playwright 三个 exit 0 才算）；在每道闸门前策展摘要后停下等我。
+
+协作的接缝全在闸门上：propose 链路它自治跑完三棒，到人工卡点 1 停下；我审完下 `/harness-apply`，它进 apply 自治跑完三棒，到人工卡点 2 停下；我审完下 `/harness-archive`，它执行归档。我不是旁观者——每个闸门我都真审、真能打回；但也不是微管理者——两闸之间我不插手。它不是执行器——自己读契约、判归属、跑退出码、做诚实披露；但也不是自走炮——每道闸门停下，不替我定"做什么"。
+
+每一步都有文档产出，每一步都有可验证的退出码或 `## 结论`：npm test exit 0（10 passed）、verify.sh exit 0（14/2/0）、Playwright exit 0（16 passed）、check-harness exit 0（71/0）。其中 RR 在写代码前拦下 `JSON.parse(null)` 暗知识、Dev 自报 PASS 被 Claude 用真实退出码复核、TE 诚实区分测试基建问题和实现缺陷——这几处就是"把完成与否从主观汇报变成可检查的客观成果"在协作接缝上的具体样子。
+
+最后补一句前面埋的地基。这一节比在 harness 自己仓库里演练多了一层真实业务仓库才暴露的东西：harness 框架本身也会水土不服——ESM 根让 hook 静默全坏（`.cjs` 化修复）、Node 24 加 CRA 的 OpenSSL 冲突（`--openssl-legacy-provider` 修复）、verify.sh 误报和性能退化（按真实栈校准 + 收窄搜索范围修复）。这些不是这个需求的内容，是让流程能真跑通的前提。地基修好之后，我和 Claude 才在一个真实 MERN 电商上完整、诚实地跑完了一个来回。
 
 ---
 

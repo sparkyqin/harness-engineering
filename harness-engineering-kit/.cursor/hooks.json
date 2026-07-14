@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node .harness/hooks/verify-after-developer.js",
+            "command": "node .harness/hooks/verify-after-developer.cjs",
             "timeout": 120000
           }
         ]
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node .harness/hooks/tester-evidence.js",
+            "command": "node .harness/hooks/tester-evidence.cjs",
             "timeout": 180000
           }
         ]
@@ -34,7 +34,7 @@
       {
         "matcher": ".*",
         "hooks": [
-          { "type": "command", "command": "node .harness/hooks/guard-dangerous.js" }
+          { "type": "command", "command": "node .harness/hooks/guard-dangerous.cjs" }
         ]
       }
     ]

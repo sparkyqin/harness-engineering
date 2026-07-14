@@ -24,8 +24,10 @@ function readStdin() {
   try { return JSON.parse(fs.readFileSync(0, 'utf8') || '{}'); } catch { return {}; }
 }
 function run(cmd, timeout = 120000) {
+  // 统一走 bash -c：Windows 下 npm 脚本/verify.sh 都依赖 bash 语法，
+  // execFileSync(cmd,{shell:true}) 在 Windows 默认 shell=cmd.exe 跑不动 `bash ...`。
   try {
-    return execFileSync(cmd, { shell: true, cwd: ROOT, encoding: 'utf8', timeout, stdio: ['ignore', 'pipe', 'pipe'] });
+    return execFileSync('bash', ['-c', cmd], { cwd: ROOT, encoding: 'utf8', timeout, stdio: ['ignore', 'pipe', 'pipe'] });
   } catch (e) {
     return (e.stdout || '') + (e.stderr || '') + (e.killed ? '[TIMEOUT]' : '');
   }
@@ -41,11 +43,13 @@ if (evt.agent_type && evt.agent_type !== 'developer') {
   process.exit(0);
 }
 
-// 1. npm test
-const testOut = run('npm test', 120000);
-const passed = (testOut.match(/(\d+)\s+passing/i) || [])[1] || '0';
-const failed = (testOut.match(/(\d+)\s+failing/i) || [])[1] || '0';
-const testPass = Number(failed) === 0 && /passing/i.test(testOut);
+// 1. npm test（兼容 vitest 的 "Tests N passed/failed" 与 mocha 的 "N passing/failing"）
+//    测试框架输出带 ANSI 颜色码，先剥离再匹配，否则数字被转义码隔开匹配不到。
+const testOutRaw = run('npm test', 120000);
+const testOut = testOutRaw.replace(/\x1b\[[0-9;]*m/g, '');
+const passed = (testOut.match(/Tests\s+(\d+)\s+passed/i) || testOut.match(/(\d+)\s+passing/i) || [])[1] || '0';
+const failed = (testOut.match(/Tests\s+(\d+)\s+failed/i) || testOut.match(/(\d+)\s+failing/i) || [])[1] || '0';
+const testPass = Number(failed) === 0 && (/passed/i.test(testOut) || /passing/i.test(testOut));
 
 // 2. verify.sh
 const verifyOut = run('bash .harness/scripts/verify.sh', 120000);

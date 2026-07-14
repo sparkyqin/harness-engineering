@@ -21,16 +21,28 @@ cd "$ROOT_DIR"
 PASS=0; WARN=0; FAIL=0
 declare -a FAIL_ITEMS=()
 
+# 真实项目布局各异：后端入口可能是 backend/server.js 也可能是根 app.js；前端可能在
+# frontend/src/ 也可能在 src/。ENTRY_FILES / SRC_DIRS 按存在性探测，避免写死单一布局
+# 造成误报（如 backend/server.js 注册了 errorMiddleware 却因只查根 server.js 而误报 C5 FAIL）。
+# SRC_DIRS 同时是 grep_src 的搜索范围——只扫源码目录，不扫 node_modules/build，否则
+# 装好依赖后 verify.sh 会因扫几千个文件从几秒拖到几分钟（甚至拖垮 hook 超时）。
+ENTRY_FILES=(backend/server.js backend/app.js src/server/server.js src/server/index.js app.js server.js index.js)
+SRC_DIRS=""
+for d in backend src/server src/client src frontend/src frontend; do [ -d "$d" ] && SRC_DIRS="$SRC_DIRS $d"; done
+[ -z "$SRC_DIRS" ] && SRC_DIRS="."   # 兜底：探测不到约定目录就扫全仓（带 node_modules 过滤）
+# 列出实际存在的入口文件（供 C1/C5 的 grep -l 使用）
+entry_list() { local f; for f in "${ENTRY_FILES[@]}"; do [ -f "$f" ] && printf '%s\n' "$f"; done; }
+
 # ---- helpers ----
 has_rg() { command -v rg >/dev/null 2>&1; }
-# 在 src 范围搜文件名/内容（排除 node_modules/dist/build）
+# 只在源码目录（SRC_DIRS）内搜，避免扫 node_modules/build 的巨大开销与误报。
 src_files() {
-  if has_rg; then rg --files -g '!node_modules' -g '!dist' -g '!build' "$@"; \
-  else find . -type f -not -path '*/node_modules/*' -not -path '*/dist/*' -not -path '*/build/*' "${@}"; fi
+  if has_rg; then rg --files $SRC_DIRS "$@"; \
+  else find $SRC_DIRS -type f -not -path '*/node_modules/*' -not -path '*/dist/*' -not -path '*/build/*' "${@}"; fi
 }
-grep_src() {  # $1=pattern
-  if has_rg; then rg -l "$1" -g '!node_modules' -g '!dist' -g '!build' 2>/dev/null; \
-  else grep -rl "$1" --include='*.js' --include='*.jsx' --include='*.ts' --include='*.tsx' . 2>/dev/null | grep -v node_modules; fi
+grep_src() {  # $1=pattern  —— 在 SRC_DIRS 内按内容搜
+  if has_rg; then rg -l "$1" $SRC_DIRS 2>/dev/null; \
+  else grep -rl "$1" --include='*.js' --include='*.jsx' --include='*.ts' --include='*.tsx' $SRC_DIRS 2>/dev/null; fi
 }
 record() { # $1=PASS|WARN|FAIL  $2=id  $3=msg
   case "$1" in
@@ -80,8 +92,8 @@ else
   record PASS A4 "无残留 console.log"
 fi
 
-# A5 单文件不超过 300 行（WARN，仅 src/）
-BIG=$(find src -type f \( -name '*.js' -o -name '*.jsx' -o -name '*.ts' -o -name '*.tsx' \) -not -path '*/node_modules/*' 2>/dev/null | while read -r f; do
+# A5 单文件不超过 300 行（WARN，扫 SRC_DIRS）
+BIG=$(find $SRC_DIRS -type f \( -name '*.js' -o -name '*.jsx' -o -name '*.ts' -o -name '*.tsx' \) -not -path '*/node_modules/*' 2>/dev/null | while read -r f; do
   lines=$(wc -l < "$f" 2>/dev/null || echo 0); [ "$lines" -gt 300 ] && echo "$f($lines)";
 done)
 if [ -n "$BIG" ]; then record WARN A5 "单文件 >300 行: $BIG"; else record PASS A5 "单文件均 ≤300 行"; fi
@@ -129,12 +141,14 @@ else
   record PASS B1 "无 build 脚本（跳过）"
 fi
 
-# B2 seeder 语法正确（Schema 与种子数据一致）
-if grep_src 'seeder\|seed\|data:import' | grep -q .; then
-  if node -c "$(grep_src 'seeder\|seed' | head -1)" 2>/dev/null || npm run data:import >/dev/null 2>&1; then
-    record PASS B2 "seeder 语法/导入正确"
+# B2 seeder 语法正确（仅校验语法，不连库——npm run data:import 需数据库，CI 不一定有）
+SEEDER=""
+for c in backend/seeder.js backend/src/seeder.js src/server/seeder.js seeder.js; do [ -f "$c" ] && SEEDER="$c" && break; done
+if [ -n "$SEEDER" ]; then
+  if node -c "$SEEDER" 2>/dev/null; then
+    record PASS B2 "seeder 语法正确（$SEEDER）"
   else
-    record FAIL B2 "seeder 语法错误或种子与 Schema 不一致"
+    record FAIL B2 "seeder 语法错误（$SEEDER）"
   fi
 else
   record PASS B2 "无 seeder（跳过）"
@@ -142,19 +156,25 @@ fi
 
 # ============ C 工程一致性 ============
 echo "[C] 工程一致性"
-# C1 路由进 app.js / server.js
-if grep_src 'app\.use(' app.js server.js index.js 2>/dev/null | grep -q . || grep -l 'app.use(' app.js server.js index.js 2>/dev/null | grep -q .; then
-  record PASS C1 "路由注册进 app/server 入口"
+# C1 路由进入口（backend/server.js 或根 app/server/index 等实际存在的入口）
+ENTRIES=$(entry_list)
+if [ -n "$ENTRIES" ] && grep -lE 'app\.use\(' $ENTRIES 2>/dev/null | grep -q .; then
+  record PASS C1 "路由注册进应用入口"
 else
   record FAIL C1 "路由未注册进应用入口"
 fi
 
-# C2 Screen 进 index.js（前端入口）
-if find src -name 'index.js' -o -name 'index.jsx' 2>/dev/null | head -1 | grep -q .; then
-  if grep_src 'Screen\|createStackNavigator\|<Route' | grep -q .; then
+# C2 Screen/Route 进前端入口（探测 frontend/src/index.* 或 src/index.*，再查 App.js/index 注册 <Route>）
+FRONT_ENTRY=""
+for c in frontend/src/index.js frontend/src/index.jsx frontend/src/main.jsx src/client/index.js src/client/index.jsx src/index.js src/index.jsx; do [ -f "$c" ] && FRONT_ENTRY="$c" && break; done
+if [ -n "$FRONT_ENTRY" ]; then
+  # 只在存在的前端源码目录里搜，避免 grep 遇到不存在的路径返回 2（pipefail 下误判 FAIL）
+  FRONT_DIRS=""
+  for d in frontend/src src/client src; do [ -d "$d" ] && FRONT_DIRS="$FRONT_DIRS $d"; done
+  if [ -n "$FRONT_DIRS" ] && grep -rlE '<Route|Screen' $FRONT_DIRS 2>/dev/null | grep -qE '(^|/)(App|index)\.(js|jsx|tsx)'; then
     record PASS C2 "Screen/Route 注册进前端入口"
   else
-    record FAIL C2 "存在 Screen 但未注册进前端入口"
+    record FAIL C2 "存在前端入口但未注册 Screen/Route"
   fi
 else
   record PASS C2 "无前端入口（跳过）"
@@ -182,9 +202,9 @@ else
   record PASS C4 "无 API Slice（跳过）"
 fi
 
-# C5 应用入口注册 errorMiddleware
+# C5 应用入口注册 errorMiddleware（backend/server.js 或根入口等实际存在的入口）
 if grep_src 'errorMiddleware\|errorHandler' | grep -q .; then
-  if grep -l 'errorMiddleware\|errorHandler' app.js server.js index.js 2>/dev/null | grep -q .; then
+  if [ -n "$ENTRIES" ] && grep -lE 'errorMiddleware|errorHandler' $ENTRIES 2>/dev/null | grep -q .; then
     record PASS C5 "应用入口注册 errorMiddleware"
   else
     record FAIL C5 "errorMiddleware 未注册进入口"

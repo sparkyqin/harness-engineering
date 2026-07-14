@@ -25,8 +25,10 @@ function readStdin() {
   try { return JSON.parse(fs.readFileSync(0, 'utf8') || '{}'); } catch { return {}; }
 }
 function run(cmd, timeout = 180000) {
+  // 统一走 bash -c：Windows 下 verify.sh/baseline.sh/python 调用都依赖 bash 语法，
+  // execFileSync(cmd,{shell:true}) 在 Windows 默认 shell=cmd.exe 跑不动 `bash ...`。
   try {
-    return execFileSync(cmd, { shell: true, cwd: ROOT, encoding: 'utf8', timeout, stdio: ['ignore', 'pipe', 'pipe'] });
+    return execFileSync('bash', ['-c', cmd], { cwd: ROOT, encoding: 'utf8', timeout, stdio: ['ignore', 'pipe', 'pipe'] });
   } catch (e) {
     return (e.stdout || '') + (e.stderr || '') + (e.killed ? '[TIMEOUT]' : '');
   }
