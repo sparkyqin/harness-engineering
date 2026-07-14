@@ -4,15 +4,13 @@
 
 很多人对 AI 编码的判断还停留在"模型够不够强"。SWE-bench 的数字确实越来越好看了，但真把 agent 放进一个几百万行的项目里，它还是在同一批地方反复摔倒：happy path 跑通就汇报"完成"，没跑测试也敢说"已验证"，围着一个 500 错误反复改 Controller 而真正的根因在 schema，用户只想补一个字段它顺手把依赖升了级、API 改了名。
 
-这些问题不是模型能力不够。有一个实验很能说明问题：Can Bölük（blog.can.ac）做过一组对照——同一个模型，只把文件编辑接口从 `apply_patch`/`str_replace` 换成自创的 hashline 格式，Grok Code Fast 1 的任务成功率从 **6.7% 跳到 68.3%**（十倍提升；原文 *I Improved 15 LLMs at Coding in One Afternoon. Only the Harness Changed.*，[blog.can.ac](https://blog.can.ac/2026/02/12/the-harness-problem/)，2026-02-12）。课程原文里也引用了这个结论的缩写版——"Can.ac 实验：同一个模型，仅替换文件编辑接口，任务成功率 6.7% → 68.3%"。他的解释是：原来的 patch 失败得太惨，模型真实的编码能力几乎被完全掩盖。模型不动，换一套围绕它的工程设施，成功率就能从个位数到六成多。
-
-> ⚠️ 关于这条引用的一个事实核查：课程逐字稿里只有缩写版的"Can.ac 实验……6.7% → 68.3%"，并未出现 Can Bölük / hashline / Grok Code Fast 1 / "Only the Harness Changed" 这些更细的措辞。这些细节来自 blog.can.ac 的原始博文，写笔记时引用的是博文原文，不归给课程逐字稿。
+这些问题不是模型能力不够。有一个实验很能说明问题：同一个模型，别的都不动，只把它与代码交互的那一层（文件编辑接口）换一套实现，任务成功率就从 **6.7% 跳到 68.3%**。文件编辑接口不归模型，归 harness——它是 agent 周边的工程设施。模型一行没变，成功率却从个位数到六成多，说明之前低的不是模型能力，是承载它的设施太差，把模型真实的编码能力掩盖了。harness 的作用就在这：它不改变模型，只决定模型能发挥出多少。
 
 这套设施就是 harness。课程给了一个总纲式的判断：**Agent = Model + Harness**（HashiCorp 联合创始人首提概念，OpenAI / Anthropic / Martin Fowler 跟进；嵌套关系 `Prompt ⊂ Context ⊂ Harness`——Harness 包含一切：工具、编排、记忆、护栏、评估）。工程师的角色从"写代码"变成"明确意图、设计环境、构建反馈回路"，人掌舵，agent 执行。
 
 这篇文章不讲理论，讲一套已经跑起来的工程实现——`harness-engineering-kit`。它围绕一个判断展开：**模型决定上限，harness 决定底线**。课程原文更直白："AI 写代码有三个致命问题：它会忘、它会绕、它会自己审自己。Harness 不是让 AI 变聪明，而是让 AI 没有太多偷懒空间""把是否完成从 AI 的主观汇报，变成可检查的客观成果——这就是 Harness Engineering 设计的关键点"。
 
-下面先快速过一下这套工程的理论地基（含两种规约编程方案 Spec Kit / OpenSpec 与它们的扩展），再讲清楚主流 agent（Claude Code）的 AI 代码生成实践技巧与速查表，然后逐层拆开 `harness-engineering-kit` 的实现——每一层都回扣到上面的理论概念，最后用一个真实任务走一遍完整流程。
+下面先快速过一下这套工程的理论地基（含两种规约编程方案 Spec Kit / OpenSpec 与它们的扩展），再讲清楚主流 agent（Claude Code）的 AI 代码生成实践技巧，然后逐层拆开 `harness-engineering-kit` 的实现——每一层都回扣到上面的理论概念，最后用一个真实任务走一遍完整流程。
 
 ---
 
@@ -24,7 +22,7 @@
 
 ![Vibe Coding vs Agentic Engineering](images/p55_vibe-coding.png)
 
-> 图：p55 氛围编程（Vibe Coding）——自然语言驱动、上下文临时、走到哪算哪；快但混乱，适合 demo 不适合生产。
+> 图：氛围编程（Vibe Coding）——自然语言驱动、上下文临时、走到哪算哪；快但混乱，适合 demo 不适合生产。
 
 | 维度 | Vibe Coding（氛围编程） | Agentic Engineering（规约/工程化） |
 |---|---|---|
@@ -124,7 +122,7 @@ The system SHALL expire sessions after 30 minutes of inactivity.
 
 ![OpenSpec 扩展三项关键支柱](images/p98_openspec-extension-pillars.png)
 
-> 图：p98 三项关键扩展——① 开发闭环（质量内建）② 复利工程（经验沉淀）③ 可插拔工作流，把"个人工具"升级成"团队工程系统"。
+> 图：三项关键扩展——① 开发闭环（质量内建）② 复利工程（经验沉淀）③ 可插拔工作流，把"个人工具"升级成"团队工程系统"。
 
 ![OpenSpec 定制扩展：原版局限 + 三项关键扩展](images/p95_openspec-extension-limits.png)
 
@@ -155,13 +153,13 @@ The system SHALL expire sessions after 30 minutes of inactivity.
 
 ![Superpowers 六大核心能力](images/p99_superpowers-6-abilities.png)
 
-> 图：p99 Superpowers 让 Agent 像高级工程师——TDD-First / Sub-Agents / Code Review / Exploration / Verification / Git Worktrees 六大能力，与 OpenSpec 正交组合（WHAT × HOW）。
+> 图：Superpowers 让 Agent 像高级工程师——TDD-First / Sub-Agents / Code Review / Exploration / Verification / Git Worktrees 六大能力，与 OpenSpec 正交组合（WHAT × HOW）。
 
 在真实的大项目里验证一下：一个百万行遗留项目，用 vibe coding 会上下文断层、重复解释、乱改代码、过度设计。OpenSpec 解决了流程问题，但**上下文问题依然存在**——所以还要补 Skills，把技术架构、最佳实践、代码规范这些"潜规则"封装成给 agent 准备的"项目入职手册"，再配一条"上下文优先规则"让 agent 先读文档再动手。接起来之后，新增流水线变量功能从"来回拉扯 5 次最后自己动手"变成"AI 自动读 skill 一次性生成正确实现"。
 
 ![百万行遗留项目：OpenSpec + Skills 实战](images/p164_openspec-skills-case.png)
 
-> 图：p164 百万行遗留项目 AI 编码实战——Vibe Coding 的四大痛点（上下文断层/重复解释/乱改代码/过度设计），用 OpenSpec 解决流程 + Skills 补上下文，配"上下文优先规则"让 agent 先读文档再动手。
+> 图：百万行遗留项目 AI 编码实战——Vibe Coding 的四大痛点（上下文断层/重复解释/乱改代码/过度设计），用 OpenSpec 解决流程 + Skills 补上下文，配"上下文优先规则"让 agent 先读文档再动手。
 
 到这一步，规约、上下文、角色都在了，但它们还只是一组实践，不是一个系统。把它们焊成一个能让 agent"没有太多偷懒空间"的工程设施，就是 harness engineering。`harness-engineering-kit` 就是这套思路的落地——它在 OpenSpec 核心思想之上，把上面三项扩展工程化、可执行化。
 
@@ -169,7 +167,7 @@ The system SHALL expire sessions after 30 minutes of inactivity.
 
 ## 二、主流 Agent 实践：Claude Code 的 AI 代码生成技巧
 
-在拆 harness 之前，先说清楚"被 harness 包裹"的那个 agent 本身怎么用。以 Claude Code 为例（这套工程同样适配 Cursor、Copilot 等），它有几条值得单说的实践技巧和一套速查表。这些技巧本身就是"轻量 harness"——在还没有完整四层防线时，它们能帮你把单个 agent 用好。
+在拆 harness 之前，先说清楚"被 harness 包裹"的那个 agent 本身怎么用。以 Claude Code 为例（这套工程同样适配 Cursor、Copilot 等），它有几条值得单说的实践技巧。这些技巧本身就是"轻量 harness"——在还没有完整四层防线时，它们能帮你把单个 agent 用好。
 
 ### 2.1 Prompt 设计：约束比鼓励更重要
 
@@ -219,11 +217,11 @@ Claude Code 有双轨记忆：**CLAUDE.md 指令记忆**（人工维护、每次
 
 ### 2.4 Rules / Skills / SubAgents / Docs 四件套
 
-这是 AI 代码生成实现框架的分工总纲：
+这是 AI 代码生成实现框架的分工总纲，也是后面 harness 四层防线的理论原型：
 
 ![AI 代码生成实现框架：Rules / Skills / SubAgents / Docs 分工](images/p54_rules-skills-subagents-docs.png)
 
-> 图：p54 实现框架分工——Rules 强约束低频改动、Skills 高频流程可复用、SubAgents 角色分工、Docs 知识与共识，四者各管一摊。
+> 图：实现框架分工——Rules 强约束低频改动、Skills 高频流程可复用、SubAgents 角色分工、Docs 知识与共识，四者各管一摊。
 
 | 组件 | 主管 | 特点 | 示例 |
 |---|---|---|---|
@@ -236,60 +234,24 @@ Claude Code 有双轨记忆：**CLAUDE.md 指令记忆**（人工维护、每次
 
 三层的关系课程原话点得很透："Rule（规则）'每次修改后必须验证' → Skill（SOP）5 步构建验证流程 → Script（门禁）verify.sh 退出码 0/1 硬判定。越往右越'硬'，**Rule 可以被忽略，Skill 可以被跳步，Script 退出码无法伪造**。"——这正是后面 harness 四层防线"从软到硬"的理论来源。
 
-### 2.5 Claude Code / Cursor 实战速查表
-
-把上面的技巧落到命令和操作上，给一张速查表（信源：cursor.com 文档、code.claude.com 文档与 Best Practices）。
+落到大型代码库上，这个判断尤其成立——harness 比模型本身更决定实际效果：
 
 ![Claude Code 大型代码库 Harness 实践](images/p238_claude-large-repo-harness.png)
 
-> 图：p238 Claude Code 大型代码库 Harness 实践——Harness 比大模型本身更决定大型代码库中的实际效果，行动清单从"让代码库可导航"到"定期维护"五步。
+> 图：大型代码库的 Harness 实践——行动清单从"让代码库可导航"到"定期维护"五步，核心是围绕模型搭好工程设施，而非只追模型版本。
 
-**四大模式决策树（3 个问题决定模式）**：
+#### 契约优先的并行子代理
 
-```
-要修改代码吗？
-  否 → Ask
-  是 → 方案心里没底 / 改动较多文件？
-          是 → Plan
-          否 → 可拆并行？
-                  是 → Multitask
-                  否 → Agent
-```
+多任务要并行得起来，前提是拆得对。四条铁律：① 文件不重叠（每个子代理给独立目录或文件清单，绝不共享）② 无强依赖（B 不需要等 A 的输出，有依赖就串行）③ Scope 明确（每个子任务一句话能讲清"做完是什么样"）④ 主代理验证（子代理只交付，主代理负责跑测试 + 汇总）。反模式：✗ 同时改一个文件（两个子代理都改 `user.ts`，merge 必冲突）；✗ 强依赖却并行（"先建表，再写 API"必须串行）；✗ 一拆拆 10 个（Token 成本爆炸，先三个起步）。
 
-经验法则：默认走 Agent（>80% 任务在这里完成）；对方案不确定或跨三个以上文件走 Plan；想"先理解再决定"走 Ask；明显独立的并行多个任务走 Multitask；**Agent 反复改错 2 次 → 回 Plan 重新规划，比追改快**；上下文超过 1 个工作单元 → 开新对话。
+第四条"主代理验证"是 harness 思维的缩影——子代理只交付，跑不跑测试、合不合格由主代理独立判定，不信任子代理的自述。这套思路在第 3 层 Agents+Workflow 和第 4 层 Scripts 里会被工程化放大。
 
-| 模式 | 定位 | 关键技巧 |
-|---|---|---|
-| **Ask**（只读理解） | 不改文件，换来更干净的探索 | `@文件`/`@docs` 拉上下文；明说 "don't write code"；渐进提问。超 5 轮开新对话或转 Plan |
-| **Plan**（先审后做） | 只读探索 → 生成可改的 Markdown 方案 → 审批后切回 Agent 落地 | 跨三文件/心里没底/不可逆操作/新功能首版/Agent 反复改错时用 |
-| **Agent**（自主执行） | 日常 80% 默认主力 | 任务加完成标准；`@` 文件按需引；看到打转就 Stop；完成单元开新对话 |
-| **Multitask**（并行任务） | 独立子任务交给一组并行子代理 | 文件不重叠、无强依赖、Scope 明确、主代理验证 |
+#### 两条把单 agent 用好的纪律
 
-**关键命令速查**：
+还有两条偏操作、但同样呼应 harness 核心判断的纪律值得记：
 
-| 命令/操作 | 作用 |
-|---|---|
-| `/plan` 或 `Shift+Tab×2` | 进入 Plan 模式（先审后做） |
-| `/rewind` | 回滚到 checkpoint（Cursor 对应：悬停历史消息→还原） |
-| `/clear` | 清空上下文开新对话（Cursor：开 new chat） |
-| `/batch` | 并行子代理（Multitask） |
-| `/teleport` | 把云端会话拉回本地继续（`claude --teleport <id>`） |
-| `Esc` / Stop | 立即停（看到打转就停） |
-| `claude --remote "任务描述"` | 本地 CLI 远程触发云端会话 |
-| `claude.ai/code` | Claude Code on the web 入口 |
-
-**契约优先的并行子代理（拆得对才并行得起来，四条铁律）**：① 文件不重叠（每个子代理给独立目录或文件清单，绝不共享）② 无强依赖（B 不需要等 A 的输出，有依赖就串行）③ Scope 明确（每个子任务一句话能讲清"做完是什么样"）④ 主代理验证（子代理只交付，主代理负责跑测试 + 汇总）。反模式：✗ 同时改一个文件（两个子代理都改 `user.ts`，merge 必冲突）；✗ 强依赖却并行（"先建表，再写 API"必须串行）；✗ 一拆拆 10 个（Token 成本爆炸，先三个起步）。
-
-**出错兜底**：Stop（Esc / 点 Stop 立即停）+ Checkpoint（`/rewind`）+ Diff 审查（改完先看 diff，不直接 accept all）+ 新开对话（`/clear`）。
-
-**Cloud Agent（云端执行）6 条做法**（按重要度）：① 任务必须明确、验收要写清；② 先有强 CI 再上 Cloud Agent（测试 flaky 则被迫逐条审查，效率反低于自写）；③ 本地规划 + 云端执行；④ 先 1 个再 10 个；⑤ 密钥用平台 Secrets 别提交进仓库；⑥ 审视频/日志不只审 diff。批量 bug 修复示例（并发 10 个）：
-
-```bash
-for issue in $(gh issue list --label bug --json number); do
-  claude --remote "fix issue #$issue, write tests"
-done
-```
-产出 10 个独立 PR + 10 段验证视频，耗时 ~30min（串行需 5h+）。
+- **方案没底就先 Plan，别边想边改**。Plan 模式只读探索、生成可改的方案、审批后再落地，本质是"先审后做"——和后面 propose 段末的人工卡点是同一个道理：深度逻辑交给人审，再放 agent 执行。经验上，Agent 反复改错 2 次就该回 Plan 重新规划，比追改快。
+- **agent 打转就停**。看到它围着同一个症状反复打补丁，立即停（Esc / Stop）并回滚 checkpoint，不要等它自己收敛——这背后就是后面"轮次封顶防死磕"要拦的失控。
 
 ---
 
@@ -299,11 +261,11 @@ done
 
 ![Agent = Model + Harness](images/p228_harness-agent-model-plus-harness.png)
 
-> 图：p228 核心判断——**Agent = Model + Harness**（HashiCorp 首提，OpenAI/Anthropic/Martin Fowler 跟进），嵌套关系 `Prompt ⊂ Context ⊂ Harness`：Harness 包含工具、编排、记忆、护栏、评估一切。Can.ac 实验里"只换文件编辑接口、成功率 6.7%→68.3%"就是这一判断的实证。
+> 图：核心判断——**Agent = Model + Harness**（HashiCorp 首提，OpenAI/Anthropic/Martin Fowler 跟进），嵌套关系 `Prompt ⊂ Context ⊂ Harness`：Harness 包含工具、编排、记忆、护栏、评估一切。Can.ac 实验里"只换文件编辑接口、成功率 6.7%→68.3%"就是这一判断的实证。
 
 ![Harness Engineering 落地实现框架](images/p239_harness-impl-framework.png)
 
-> 图：p239 Harness Engineering 落地实现框架——后续 p240-p244 逐层展开的意图层 / 执行层 / 保障层的总纲页。
+> 图：Harness Engineering 落地实现框架——意图层 / 执行层 / 保障层的总纲页，后续逐层展开。
 
 目录结构长这样：
 
@@ -399,7 +361,7 @@ Skill 也会被跳步，所以也是软的。它为 Rules 兜底，自己又需�
 
 ![业界五大编排模式与 Harness 的选择](images/p180_orchestration-patterns.png)
 
-> 图：p180 五大编排模式——Sequential / Concurrent / **Supervisor/Worker** / Handoff / Group Chat。harness 选 Supervisor/Worker（PM 当 Supervisor、6 Worker 接力），不是不知道更复杂的，而是不需要：确定性流程无需动态路由，人工卡点要求 PM 必须在主会话。选型原则是"能可靠满足需求的最低复杂度方案"。
+> 图：五大编排模式——Sequential / Concurrent / **Supervisor/Worker** / Handoff / Group Chat。harness 选 Supervisor/Worker（PM 当 Supervisor、6 Worker 接力），不是不知道更复杂的，而是不需要：确定性流程无需动态路由，人工卡点要求 PM 必须在主会话。选型原则是"能可靠满足需求的最低复杂度方案"。
 
 ### 6.2 五要素契约：每个角色怎么定义
 
@@ -431,7 +393,7 @@ Skill 也会被跳步，所以也是软的。它为 Rules 兜底，自己又需�
 
 ![Harness 执行层：工作流状态机](images/p242_harness-exec-layer.png)
 
-> 图：p242 执行层——propose 段 BA→SA→RR→[人工卡点 1]、apply 段 Dev→CR→TE→[人工卡点 2]，状态机式的 PASS/BLOCK/REJECT/FAIL 路由，配角色契约五要素与四条流程铁律。
+> 图：执行层——propose 段 BA→SA→RR→[人工卡点 1]、apply 段 Dev→CR→TE→[人工卡点 2]，状态机式的 PASS/BLOCK/REJECT/FAIL 路由，配角色契约五要素与四条流程铁律。
 
 完整 8 步：0 初始化 → 1 BA 需求 → 2 SA 方案 → 3 RR 评审 → [人工卡点 1] → 4 Dev 开发 → 5 CR 审查 → 6 TE 测试 → [人工卡点 2] → 7 PM 归档。两个人工卡点是不可跳过的——propose 走完要人审 readiness-review，apply 走完要人审全量 deliverables。这是"深度逻辑需要交给人来审核"的落地（呼应 Plan 模式"先审后做"+ Claude Code 创始人的 "Verification Before Done：永远不要在没有证明有效的情况下标记任务完成"）。
 
@@ -501,7 +463,7 @@ PM 在主会话每执行一个非 Read 工具动作，事务性地抛一条心�
 
 ![质量门禁：verify.sh 检查类别详表](images/p245_verify-sh-check-categories.png)
 
-> 图：p245 verify.sh 检查类别详表——A 静态规范 / B 交付门槛 / C 工程一致性三类，区分 FAIL 阻塞与 WARN 记录，附 baseline.sh 与 check-harness.sh 定位。
+> 图：verify.sh 检查类别详表——A 静态规范 / B 交付门槛 / C 工程一致性三类，区分 FAIL 阻塞与 WARN 记录，附 baseline.sh 与 check-harness.sh 定位。
 
 退出码 0 是全过（可有 WARN），1 是有 FAIL。**FAIL = 阻塞交付**。这份清单和 CR 的六维度审查是对齐的——CR 按 design 对照实现、按 code-standards 查规范、按 verify.sh A/C 类查一致性，审查的依据就是脚本要校验的东西。
 
@@ -523,7 +485,7 @@ refactor 档在 propose 前先跑 `baseline.sh snapshot`，存一份基线（ver
 
 ![Harness 保障层：质量管控 + 记忆管理](images/p244_harness-quality-layer.png)
 
-> 图：p244 保障层——质量不靠 Agent 自觉、靠工程化流程强制；写代码的人不能自己判合格、判合格的人不能自己改代码；静态四层防线 + 动态记忆 = 可自我进化的框架。
+> 图：保障层——质量不靠 Agent 自觉、靠工程化流程强制；写代码的人不能自己判合格、判合格的人不能自己改代码；静态四层防线 + 动态记忆 = 可自我进化的框架。
 
 这是第四层里最关键的一环。`.claude/settings.json` 注册了四类事件，三个 hook 实现：
 
@@ -585,7 +547,7 @@ specs 随交付逐步建立。每次 archive 时 PM 把 delta 合并进对应 `s
 
 ![Harness 意图层：SHALL + GWT 与 specs 作 Source of Truth](images/p241_harness-intent-layer.png)
 
-> 图：p241 意图层——需求规格化用 SHALL + GWT（Given/When/Then），核心价值是"需求→测试用例零翻译成本"，developer 与 test-engineer 可直接推导；specs/ 作 Source of Truth，codebase-guide/ 按角色分发必读文档（Role Contract 控制），避免一次性灌入全部上下文。
+> 图：意图层——需求规格化用 SHALL + GWT（Given/When/Then），核心价值是"需求→测试用例零翻译成本"，developer 与 test-engineer 可直接推导；specs/ 作 Source of Truth，codebase-guide/ 按角色分发必读文档（Role Contract 控制），避免一次性灌入全部上下文。
 
 ```
 ### Requirement: 下单前手机号校验
@@ -784,7 +746,7 @@ RR 是开发前的独立可行性把关，standard 和 refactor 档需要它。�
 
 ![为什么需要 Harness Engineering：八类失控模式](images/p227_why-harness-failure-modes.png)
 
-> 图：p227 为什么需要 Harness Engineering——虚报进展 / 约束规避 / 降低标准 / 上下文失忆 / 跳过步骤 / 伪造验证 / 错误死磕 / 小题大做，正是下表逐条拦截的失控清单。
+> 图：为什么需要 Harness Engineering——虚报进展 / 约束规避 / 降低标准 / 上下文失忆 / 跳过步骤 / 伪造验证 / 错误死磕 / 小题大做，正是下表逐条拦截的失控清单。
 
 | 失控 | 拦截手段 |
 |---|---|
@@ -817,7 +779,7 @@ RR 是开发前的独立可行性把关，standard 和 refactor 档需要它。�
 
 ![Harness Engineering 实战总结：行动清单 + 成熟度](images/p249_harness-action-checklist-maturity.png)
 
-> 图：p249 Harness 实战总结——P0 必须做 / P1 强烈建议 / P2 持续优化 的行动清单，配 Level 0-4 成熟度模型与"模型决定上限，Harness 决定底线"的核心判断。
+> 图：Harness 实战总结——P0 必须做 / P1 强烈建议 / P2 持续优化 的行动清单，配 Level 0-4 成熟度模型与"模型决定上限，Harness 决定底线"的核心判断。
 
 落地路径：
 
@@ -841,7 +803,7 @@ harness engineering 的关键点就一句话：**把"是否完成"从 agent 的�
 
 ![Rule / Skill / SubAgent / Workflow / Scripts / MCP 总览](images/p250_rule-skill-script-summary.png)
 
-> 图：p250 六件套总览——Rule 是软约束（会被忽略/绕过）、Skill 把固定流程下沉成 SOP、SubAgent 固定角色分工、Workflow 接力赛单向信息流、Scripts 硬门禁退出码说了算、MCP 是受治理的外接能力接口。
+> 图：六件套总览——Rule 是软约束（会被忽略/绕过）、Skill 把固定流程下沉成 SOP、SubAgent 固定角色分工、Workflow 接力赛单向信息流、Scripts 硬门禁退出码说了算、MCP 是受治理的外接能力接口。
 
 每一层都不是灵丹妙药，单看都是常识。但叠在一起，agent 就从"一个会写代码的聊天框"变成了"一个需要工程设施的执行节点"。它没有太多偷懒空间——因为交付不靠它说了什么，靠脚本检查。
 
