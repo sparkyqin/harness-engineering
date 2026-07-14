@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "proshop-harness": {
+      "command": "node",
+      "args": ["mcp-server/index.js"],
+      "env": { "NODE_ENV": "development" }
+    }
+  },
+  "_note": "MCP 是 Agent 的工具箱标准化接口，底层仍是脚本。降级：MCP 不可用 → Agent 直接跑 bash（功能等价）。USB-C 统一了充电口，但没有 USB-C 设备照样能充电。"
+}

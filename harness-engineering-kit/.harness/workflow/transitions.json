@@ -1,0 +1,93 @@
+{
+  "$schema": "harness-state-machine/v1",
+  "description": "Harness 状态机：定义 board 阶段、流转条件、回退路径与轮次上限。PM 按此推进。",
+  "profiles": {
+    "quick": {
+      "chain": ["BA", "SA"],
+      "note": "SA 在 design.md 写 ## 就绪自评 替代 RR；跳过 RR",
+      "requires_baseline": false
+    },
+    "standard": {
+      "chain": ["BA", "SA", "RR"],
+      "requires_baseline": false
+    },
+    "refactor": {
+      "chain": ["SA:impact", "BA", "SA", "RR"],
+      "note": "先跑 baseline.sh snapshot，SA 先做 impact-analysis",
+      "requires_baseline": true
+    }
+  },
+  "phases": {
+    "PENDING": {
+      "on_enter": ["init-task.sh 创建目录+模板", "board 登记", "baseline.sh snapshot(refactor)"],
+      "next": "PROPOSE_IN_PROGRESS",
+      "trigger": "/harness-propose"
+    },
+    "PROPOSE_IN_PROGRESS": {
+      "chain_ref": "profiles.<profile>.chain",
+      "per_baton": {
+        "on_PASS": "advance_next_baton",
+        "on_BLOCK": "rollback_to_upstream_baton",
+        "on_block_exhausted": "escalate_to_human"
+      },
+      "next": "AWAITING_APPROVAL_1",
+      "trigger_all_pass": "all batons PASS"
+    },
+    "AWAITING_APPROVAL_1": {
+      "type": "human_gate",
+      "review": "readiness-review.md (quick 档看 design.md ## 就绪自评)",
+      "next_on_approve": "APPLY_IN_PROGRESS",
+      "next_on_reject": "PROPOSE_IN_PROGRESS (改 proposal 重跑)"
+    },
+    "APPLY_IN_PROGRESS": {
+      "chain": ["DEV", "CR", "TE"],
+      "round_caps": { "DEV": 5, "CR": 3, "TE": 3 },
+      "per_baton": {
+        "DEV_on_hook_PASS": "advance_to_CR",
+        "DEV_on_hook_FAIL": "retry_DEV (cap 5)",
+        "CR_on_PASS": "advance_to_TE",
+        "CR_on_REJECT": "route_by_ownership (DEV/TE/upstream)",
+        "TE_on_PASS": "PM_finalize",
+        "TE_on_FAIL_impl": "retry_DEV",
+        "TE_on_FAIL_req": "escalate_to_human (改 proposal 重跑 propose)",
+        "on_cap_exceeded": "escalate_to_human"
+      },
+      "next": "AWAITING_APPROVAL_2"
+    },
+    "AWAITING_APPROVAL_2": {
+      "type": "human_gate",
+      "review": "deliverables/<task>/ 全量",
+      "pm_forbidden": "改码 (Re-run 须先诊断归属再调度 Worker)",
+      "next_on_approve": "ARCHIVE_IN_PROGRESS",
+      "next_on_reject": "APPLY_IN_PROGRESS (诊断归属后调度)"
+    },
+    "ARCHIVE_IN_PROGRESS": {
+      "steps": [
+        "spec_merge (ADDED/MODIFIED/REMOVED)",
+        "memory_merge (可复用经验 → memory/entries)",
+        "evidence_precheck + mv 归档 (deliverables → _archive)",
+        "board → DONE (结论列写归档摘要)",
+        "check-harness.sh 终检 (FAIL → PM 修，3 轮修不动则回滚升级)"
+      ],
+      "next": "DONE"
+    },
+    "DONE": {
+      "type": "terminal"
+    }
+  },
+  "rollback_table": {
+    "propose_BLOCK": { "from": "SA|RR", "to": "upstream(BA)", "executor": "PM", "cross_boundary": false },
+    "apply_CR_REJECT": { "from": "CR", "to": "DEV|TE|upstream (按归属)", "executor": "PM", "cross_boundary": false },
+    "apply_TE_FAIL_impl": { "from": "TE", "to": "DEV", "executor": "PM", "cross_boundary": false },
+    "apply_TE_FAIL_req": { "from": "TE", "to": "human (改 proposal 重跑 propose)", "executor": "human", "cross_boundary": true }
+  },
+  "heartbeat_classes": [
+    "Profile 识别",
+    "文档就位",
+    "Task 开工",
+    "脚本事件",
+    "Task 收工",
+    "异常告警"
+  ],
+  "heartbeat_rule": "一条心跳只绑定一个非 Read tool_use；tool 返回后先抛结果心跳，再进入下一动作"
+}

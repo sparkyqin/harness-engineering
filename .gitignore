@@ -1,0 +1,13 @@
+# Harness Engineering — root .gitignore
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 子目录各自维护更细的规则（见 harness-engineering-kit/.gitignore）

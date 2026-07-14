@@ -1,0 +1,32 @@
+{
+  "hooks": {
+    "SubagentStop": [
+      {
+        "matcher": "developer",
+        "hooks": [{ "type": "command", "command": "node .harness/hooks/verify-after-developer.js", "timeout": 120000 }]
+      },
+      {
+        "matcher": "test-engineer",
+        "hooks": [{ "type": "command", "command": "node .harness/hooks/tester-evidence.js", "timeout": 180000 }]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [{ "type": "command", "command": "npx prettier --write \"$CLAUDE_FILE_PATH\" 2>/dev/null || true" }]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [{ "type": "command", "command": "node .harness/hooks/guard-dangerous.js" }]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [{ "type": "command", "command": "echo '[SessionStart] Harness 上下文已加载：AGENTS.md / CLAUDE.md / GUIDE.md'" }]
+      }
+    ]
+  },
+  "_note": "Claude Code hooks 事件：PreToolUse(工具前,matcher过滤) / PostToolUse(工具后) / SessionStart / Stop / SubagentStop(子代理停止)。对照 .cursor/hooks.json 的 after_subagent/after_file_edit/before_command。"
+}

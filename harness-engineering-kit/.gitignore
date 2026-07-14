@@ -1,0 +1,53 @@
+# Harness Engineering — .gitignore
+
+# 依赖
+node_modules/
+.pnp
+.pnp.js
+
+# 构建产物
+dist/
+build/
+out/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# 日志与本地数据库
+*.log
+*.db
+*.sqlite
+*.sqlite3
+user-phone-server.log
+
+# 测试覆盖率 / 报告
+coverage/
+.coverage
+*.lcov
+playwright-report/
+test-results/
+e2e-report/
+
+# Harness 运行时产物（保留目录结构，忽略内容）
+.harness/baseline/*
+!.harness/baseline/.gitkeep
+.harness/.backups/
+.harness/.build-stamp
+.harness/__pycache__/
+**/__pycache__/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 环境变量
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db

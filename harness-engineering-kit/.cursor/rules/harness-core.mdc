@@ -1,0 +1,45 @@
+---
+description: Harness 核心三步验证底线（alwaysApply）。所有角色必守。
+globs: "**/*"
+alwaysApply: true
+---
+
+# harness-core — 核心三步验证底线
+
+> 这是 Harness 的底线纪律。声明意图层——告诉 Agent 应该做什么。
+> 声明≠执行：从 Rules → Skills → Scripts 是"意图→SOP→硬约束"的逐层兜底。
+> 遵循率随上下文增长而衰减——故有 Skills 固化步骤 + Scripts 做硬检查。
+
+## 三步验证底线（每个动作前后必想）
+
+1. **做之前**：这一步对应的 R-xxx/S-xxx 是什么？没有需求来源的动作不做。
+2. **做之中**：是否在改上游制品？是 → 停，BLOCK 让 PM 打回。
+3. **做完后**：有没有可验证的产出（文档 `## 结论` / 测试输出 / 退出码）？没有不算做完。
+
+## 七条铁律（精简版，详见 GUIDE.md）
+
+1. 下游不改上游制品。
+2. PM 只做调度。
+3. 每一棒必须有文档产出（`## 结论 PASS` 才算交棒）。
+4. 跨命令边界不自主回退。
+5. FAIL = 阻塞交付（WARN 仅记录）。
+6. 一条心跳只绑定一个非 Read tool_use。
+7. 轮次封顶（Dev 5 / 其他 3），超限升级。
+
+## 语气与措辞
+
+- 用强硬语气：NEVER > Avoid > Prefer。
+- 引用路径而不是复制代码（粘贴的代码会过时）。
+- 包含自检步骤：写完 API 后进行 3 项验证。
+
+## 退化拦截对照
+
+| 退化 | 拦截 |
+|---|---|
+| 虚报进展 | TE E2E + verify + baseline |
+| 降测试标准 | verify C 类 + test-e2e Skill |
+| 伪造验证 | after_subagent hook 退出码 |
+| 错误死磕 | 轮次封顶升级 |
+| 小题大做 | proposal 范围 + RR 拦截 |
+| 上下文失忆 | memory + specs + 每棒文档 |
+| 跳过预构建 | baseline + build-test Skill |

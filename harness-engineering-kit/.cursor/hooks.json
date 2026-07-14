@@ -1,0 +1,44 @@
+{
+  "hooks": {
+    "after_subagent": [
+      {
+        "matcher": "developer",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .harness/hooks/verify-after-developer.js",
+            "timeout": 120000
+          }
+        ]
+      },
+      {
+        "matcher": "test-engineer",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .harness/hooks/tester-evidence.js",
+            "timeout": 180000
+          }
+        ]
+      }
+    ],
+    "after_file_edit": [
+      {
+        "matcher": "**/*.{js,jsx,ts,tsx}",
+        "hooks": [
+          { "type": "command", "command": "npx prettier --write \"$FILE\" 2>/dev/null || true" }
+        ]
+      }
+    ],
+    "before_command": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          { "type": "command", "command": "node .harness/hooks/guard-dangerous.js" }
+        ]
+      }
+    ]
+  },
+  "_comment_claude_code": "Claude Code 等价配置见 .claude/settings.json：PreToolUse(SubagentStop) / PostToolUse(Write|Edit) / PreToolUse(Bash)",
+  "_protocol": "stdin: {event, agent_name, exit_code, files_changed, command, file} JSON；stdout: {decision: allow|block, followup_message, modified_params} JSON"
+}
