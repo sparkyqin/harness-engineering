@@ -18,21 +18,26 @@
 
 ```
 AGENTS.md / CLAUDE.md          ← 你正在读的入口
-.cursor/rules/                 ← 第1层 Rules（软约束，3 个 .mdc，按 glob 分作用域）
-.cursor/skills/                ← 第2层 Skills（SOP 手册：build-test / post-verify / code-review / test-e2e）
-.cursor/agents/                ← 第3层 Worker 子代理（BA/SA/RR/Dev/CR/TE）
-.cursor/commands/              ← 斜杠命令：harness-propose / harness-apply / harness-archive
-.harness/                      ← 核心工程工作流目录
+.cursor/                       ← Cursor IDE 配置（rules/skills/agents/commands/hooks/mcp）
+.claude/                       ← Claude Code 等价配置（commands/agents/skills/settings.json）
+  ├── commands/                ← 斜杠命令：harness-propose / harness-apply / harness-archive
+  ├── agents/                  ← 第3层 Worker 子代理入口（BA/SA/RR/Dev/CR/TE，引用 .harness/agents 契约）
+  ├── skills/                  ← 第2层 Skills（build-test/post-verify/code-review/test-e2e + code-standards/workflow-discipline）
+  └── settings.json            ← Hooks 配置（SubagentStop/PostToolUse/PreToolUse/SessionStart）
+.harness/                      ← 核心工程工作流目录（IDE 无关，单一来源）
   ├── agents/                  ← 7 个角色定义（含 PM），每个内嵌五要素契约
+  ├── hooks/                   ← Hook 实现（guard-dangerous / verify-after-developer / tester-evidence / format-on-edit）
   ├── workflow/                ← flow-definition / transitions.json / subagent-orchestration
   ├── scripts/                 ← 第4层 Scripts 硬门禁：verify.sh / baseline.sh / check-harness.sh / init-task.sh ...
   ├── specs/                   ← 系统能力 Source of Truth（随交付 merge）
   ├── deliverables/            ← 任务文档产出 + _template + _archive
   ├── codebase-guide/          ← 模块化知识地图（6 个子文档）
   └── memory/                  ← 记忆库（entries / templates / index.md）
-mcp-server/                    ← 8 个 MCP 工具接口（可选增强，非硬依赖）
+mcp-server/                    ← 8 个 MCP 工具接口（可选增强，非硬依赖；Claude Code 默认未启用）
 GUIDE.md                       ← 工作流总览（propose / apply / archive 三阶段）
 ```
+
+> 双 IDE 共存：`.cursor/` 给 Cursor，`.claude/` 给 Claude Code，二者都引用 `.harness/` 下的契约与脚本（单一来源）。详见 CLAUDE.md「Claude Code 适配」段。
 
 ## 工作流三步（记住这个就够了）
 

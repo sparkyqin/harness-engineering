@@ -1,14 +1,16 @@
 #!/usr/bin/env node
 /**
- * guard-dangerous.js — before_command hook
+ * guard-dangerous.js — Claude Code PreToolUse:Bash hook
  *
- * 触发：命令执行前（beforeShellExecution / PreToolUse:Bash）。
+ * 触发：Bash 工具执行前（settings.json 的 PreToolUse matcher: Bash）。
  * 作用：拦截高风险命令（rm -rf /、DROP TABLE、git push --force 到 main 等）。
- *       exit code 非 0 = 操作被取消（before_* 门禁语义）。
  *
- * 协议：
- *   stdin: {"event":"before_command","command":"...","cwd":"..."}
- *   stdout: {"decision":"allow|block","followup_message":"..."}
+ * Claude Code 协议（与 Cursor 的 before_command 不同）：
+ *   stdin:  {"hook_event_name":"PreToolUse","tool_name":"Bash",
+ *            "tool_input":{"command":"..."}, ...}
+ *   stdout: {"hookSpecificOutput":{"hookEventName":"PreToolUse",
+ *            "permissionDecision":"allow|deny","permissionDecisionReason":"..."}}
+ *   permissionDecision="deny" = 操作被取消；exit 2 亦可阻断。
  */
 'use strict';
 const fs = require('node:fs');
@@ -18,7 +20,8 @@ function readStdin() {
 }
 
 const evt = readStdin();
-const cmd = evt.command || '';
+// Claude Code 把命令放在 tool_input.command；兼容 Cursor 的顶层 command 字段。
+const cmd = (evt.tool_input && evt.tool_input.command) || evt.command || '';
 
 const DANGER = [
   { re: /rm\s+-rf?\s+\/(\s|$)/, msg: 'rm -rf / 危险，已拦截' },
@@ -29,10 +32,22 @@ const DANGER = [
 
 for (const d of DANGER) {
   if (d.re.test(cmd)) {
-    process.stdout.write(JSON.stringify({ decision: 'block', followup_message: `[guard] ${d.msg}` }) + '\n');
-    process.exit(2); // before_*：非 0 = 阻止操作
+    process.stdout.write(JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason: `[guard] ${d.msg}`,
+      },
+    }) + '\n');
+    process.exit(0); // JSON deny 已表达阻断；exit 0 避免被当错误吞掉
   }
 }
 
-process.stdout.write(JSON.stringify({ decision: 'allow', followup_message: '' }) + '\n');
+process.stdout.write(JSON.stringify({
+  hookSpecificOutput: {
+    hookEventName: 'PreToolUse',
+    permissionDecision: 'allow',
+    permissionDecisionReason: '',
+  },
+}) + '\n');
 process.exit(0);

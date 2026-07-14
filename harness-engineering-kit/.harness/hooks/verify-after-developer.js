@@ -1,20 +1,22 @@
 #!/usr/bin/env node
 /**
- * verify-after-developer.js — after_subagent(developer) hook
+ * verify-after-developer.js — Claude Code SubagentStop(developer) hook
  *
- * 触发：Developer 子代理停止后。
+ * 触发：Developer 子代理停止后（settings.json 的 SubagentStop matcher: developer）。
  * 作用：不问 Dev，程序自跑 npm test + verify.sh，退出码无法伪造。
- *       汇总 PASS/FAIL + 原因，构造 followup_message 注入主会话（PM）。
- *       PM 读 followup → verdict=PASS 进 CR；verdict=FAIL 重拉 Dev（最多 5 轮）。
+ *       汇总 PASS/FAIL + 原因，通过 additionalContext 注入主会话（PM）。
+ *       PM 读 additionalContext → verdict=PASS 进 CR；verdict=FAIL 重拉 Dev（最多 5 轮）。
  *
- * 协议：
- *   stdin  (IDE → Hook): {"event":"after_subagent","agent_name":"developer","exit_code":0,"files_changed":[...]}
- *   stdout (Hook → IDE): {"decision":"allow","followup_message":"..."}
+ * Claude Code 协议（与 Cursor 的 after_subagent 不同）：
+ *   stdin:  {"hook_event_name":"SubagentStop","agent_type":"developer", ...}
+ *           （agent_type = .claude/agents/<name>.md 的 name 字段，非 agent_name）
+ *   stdout: {"decision":"allow","hookSpecificOutput":{
+ *             "hookEventName":"SubagentStop","additionalContext":"<verdict 文本>"}}
+ *   additionalContext 会作为旁路上下文注入主会话；decision:"allow" 不阻止 subagent 停止。
  */
 'use strict';
 const { execFileSync } = require('node:child_process');
 const path = require('node:path');
-const fs = require('node:fs');
 
 const ROOT = path.resolve(__dirname, '../..');
 
@@ -28,12 +30,13 @@ function run(cmd, timeout = 120000) {
     return (e.stdout || '') + (e.stderr || '') + (e.killed ? '[TIMEOUT]' : '');
   }
 }
+const fs = require('node:fs');
 
 const evt = readStdin();
-const resp = { decision: 'allow', followup_message: '' };
+const resp = { decision: 'allow', hookSpecificOutput: { hookEventName: 'SubagentStop', additionalContext: '' } };
 
-// 只在 developer 停止时跑（matcher 已过滤，这里二次确认）
-if (evt.agent_name && evt.agent_name !== 'developer') {
+// 只在 developer 停止时跑（matcher 已过滤，这里二次确认：Claude Code 用 agent_type）
+if (evt.agent_type && evt.agent_type !== 'developer') {
   process.stdout.write(JSON.stringify(resp) + '\n');
   process.exit(0);
 }
@@ -50,7 +53,7 @@ const verifyPass = /结论: verify\.sh PASS/.test(verifyOut);
 
 const verdict = testPass && verifyPass ? 'PASS' : 'FAIL';
 
-resp.followup_message =
+resp.hookSpecificOutput.additionalContext =
   `[developer hook] verdict=${verdict}\n` +
   `  npm test: ${testPass ? 'PASS' : 'FAIL'} (${passed} passed, ${failed} failed)\n` +
   `  verify.sh: ${verifyPass ? 'PASS' : 'FAIL'}\n` +
