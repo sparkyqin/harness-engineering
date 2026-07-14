@@ -21,7 +21,7 @@ phase: apply
 
 | 要素 | 说明 | TE 的具体内容 |
 |---|---|---|
-| 输入 | 读什么 | `requirements.md`（R-xxx/S-xxx）、Dev 改动代码、`design.md`、`.cursor/skills/test-e2e` |
+| 输入 | 读什么 | `requirements.md`（R-xxx/S-xxx）、Dev 改动代码、`design.md`、`.claude/skills/test-e2e`（Cursor 用 `.cursor/skills/test-e2e`） |
 | 输出 | 写什么 | 测试代码 + `deliverables/<task>/test-report.md`，含 `## 结论 PASS/FAIL` + 失败归属 |
 | 阻塞条件 | 何时必须停 | 测试环境起不来 / 缺关键 fixture → 报 PM；FAIL 需判定实现级/需求级 |
 | 禁止事项 | 绝对不能做 | 改实现代码、降测试标准、删失败用例、把"看起来像"当"真的验证过" |
@@ -70,9 +70,9 @@ phase: apply
 <!-- 若 FAIL 则写 ## 结论 FAIL + 归属(实现级/需求级) + 失败摘要 -->
 ```
 
-## tester hook（after_subagent）
+## tester hook（子代理停止时）
 
-TE 停止后，hook 自动跑测试证据闭环 + verify + baseline compare，把结果注入 followup_message。PM 据此判定：
+TE 停止后，hook 自动跑测试证据闭环 + verify + baseline compare，把结果注入主会话（Claude Code 用 `additionalContext`，Cursor 用 `followup_message`）。PM 据此判定：
 - 全 PASS → PM 收尾（check-harness + 模板体检 + board AWAITING_ARCHIVE）。
 - FAIL(实现级) → 打回 Dev（重试，Dev 上限 5 轮）。
 - FAIL(需求级) → 升级人 → 改 proposal → 重跑 `/harness-propose`。

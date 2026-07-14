@@ -106,35 +106,67 @@ harness-engineering-kit/
 | CR | Code Reviewer | apply | 旗舰 | code-review.md |
 | TE | Test Engineer | apply | 旗舰 | test-report.md + 测试代码 |
 
-## 快速上手
+## 快速上手（在真实项目上跑）
 
-> **Claude Code（Windows）**：在 `harness-engineering-kit/` 目录下 `claude` 启动会话，`/harness-*` 命令即用。脚本走 Git Bash（Windows 原生 cmd 不支持）。依赖：node / npm / bash / git。详见 CLAUDE.md「Claude Code 适配」段。
+> kit 是**项目无关的 harness 框架**——它不含业务代码，要真实跑通完整 propose→apply→archive（含 `npm test`/build/E2E），需把它接入一个有 `package.json` + 测试脚本的真实项目。
+> **Claude Code（Windows）**：脚本走 Git Bash（原生 cmd 不支持）。依赖：node / npm / bash / git。
 > **Cursor**：用 `.cursor/` 配置，命令/代理/skills 在对应目录。
 
-1. **初始化知识地图**（首次）：
-   ```bash
-   bash .harness/scripts/codebase-guide-init.sh
-   ```
-2. **校验 Harness 完整性**：
-   ```bash
-   bash .harness/scripts/check-harness.sh
-   ```
-3. **开新任务**：
-   ```bash
-   bash .harness/scripts/init-task.sh my-feature standard
-   ```
-4. **打磨 proposal.md 后**：
-   ```
-   /harness-propose my-feature <需求描述>
-   ```
-5. **人工审批 1 后**：
-   ```
-   /harness-apply my-feature
-   ```
-6. **人工审批 2 后**：
-   ```
-   /harness-archive my-feature
-   ```
+### 0. 接入真实项目（首次）
+把 kit 内容并入你的项目根目录（与 `package.json` 同级）：
+```
+your-project/
+├── package.json            ← 你已有的项目
+├── src/  server.js  ...    ← 你的业务代码
+├── AGENTS.md  CLAUDE.md  GUIDE.md   ← 从 kit 复制
+├── .claude/                ← 从 kit 复制（Claude Code 配置）
+├── .cursor/                ← 从 kit 复制（Cursor 用，Claude Code 可不留）
+├── .harness/               ← 从 kit 复制（核心工作流，IDE 无关）
+└── mcp-server/             ← 从 kit 复制（可选）
+```
+> 若不想污染项目根，也可把整个 `harness-engineering-kit/` 作为子目录，但 `verify.sh` 的路径探测以仓库根为准，放项目根最省事。
+
+### 1. 在项目根启动 Claude Code
+```bash
+cd your-project
+claude
+```
+会话启动自动读 `CLAUDE.md` + `.claude/settings.json`（hooks 生效）。
+
+### 2. 生成知识地图骨架（首次）
+```bash
+bash .harness/scripts/codebase-guide-init.sh
+```
+探测真实项目技术栈，生成 `codebase-guide/` 骨架（已存在的文件会跳过，不覆盖）。**随后人工/AI 补充实质内容**（架构、模块依赖、开发配方）——这是 Worker 各棒必读的上下文底座。
+
+### 3. 校验 Harness 完整性
+```bash
+bash .harness/scripts/check-harness.sh
+```
+应 PASS（71 项）。
+
+### 4. 开新任务
+```bash
+bash .harness/scripts/init-task.sh my-feature standard
+```
+创建 `deliverables/my-feature/` + 模板 + 登记 `board.md`。
+
+### 5. 打磨 proposal.md 后
+```
+/harness-propose my-feature <需求描述>
+```
+
+### 6. 人工审批 1 后
+```
+/harness-apply my-feature
+```
+
+### 7. 人工审批 2 后
+```
+/harness-archive my-feature
+```
+
+> **Windows 注意**：所有脚本用 Git Bash 跑（`bash .harness/scripts/xxx.sh`）；路径一律正斜杠。`verify.sh` 的 A/C 类检查针对 Mongoose/Express/RTK Query 栈，非该栈会大量输出"跳过"——属预期，按你的实际栈校准 FAIL 项含义。
 
 ## 成熟度等级（你在哪一级？）
 

@@ -69,7 +69,7 @@ Task(agent="readiness-reviewer",
 # 1. Dev
 [PM] Task developer 开工 (apply 节点 1/3)
 Task(agent="developer", input="读 requirements+design+tasks，实现代码+dev-log，过 hook")
-→ after_subagent hook 自跑 npm test + verify.sh → followup_message
+→ 子代理停止 hook 自跑 npm test + verify.sh → 结果注入主会话（Claude Code `additionalContext` / Cursor `followup_message`）
 → [PM] Hook 旁路验证: PASS (N passed; verify.sh PASS)  或  FAIL → 重拉 Dev (cap 5)
 
 # 2. CR

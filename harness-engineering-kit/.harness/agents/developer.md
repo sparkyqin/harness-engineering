@@ -10,7 +10,7 @@ phase: apply
 # Developer（Dev）角色契约
 
 > Dev 是 apply 链路的第一棒。
-> 职责：按 design 的任务拆解实现代码，写 dev-log，过 `developer hook`（after_subagent 自跑 npm test + verify.sh）。
+> 职责：按 design 的任务拆解实现代码，写 dev-log，过 `developer hook`（Dev 停止时自跑 npm test + verify.sh）。
 > Dev **不改需求、不改方案**；发现需求/方案问题 → 报回 PM 升级，不自己改（铁律 1/4）。
 
 ## 身份宣言
@@ -56,13 +56,13 @@ phase: apply
 5. （refactor 档）跑 `baseline.sh compare`，确认未新增 FAIL。
 6. 写 dev-log.md 交回 PM；hook 会自动复核 npm test + verify.sh。
 
-## developer hook（after_subagent）
+## developer hook（子代理停止时）
 
-PM 拉起 Dev 后，`after_subagent` hook 在 Dev 停止时自动运行：
-1. 读 stdin JSON，确认 `agent_name == "developer"`。
+PM 拉起 Dev 后，`SubagentStop` hook（Claude Code）/ `after_subagent`（Cursor）在 Dev 停止时自动运行：
+1. 读 stdin JSON，确认是 developer（Claude Code 读 `agent_type`，Cursor 读 `agent_name`）。
 2. 程序自跑 `npm test` + `verify.sh`（不问 Dev，退出码说了算）。
-3. 汇总 PASS/FAIL + 原因，构造 `followup_message` 注入主会话。
-4. PM 读 followup → verdict=PASS 则进 CR；verdict=FAIL 则重拉 Dev（最多 5 轮）。
+3. 汇总 PASS/FAIL + 原因，构造结果注入主会话（Claude Code 用 `additionalContext`，Cursor 用 `followup_message`）。
+4. PM 读注入结果 → verdict=PASS 则进 CR；verdict=FAIL 则重拉 Dev（最多 5 轮）。
 
 **为什么这样设计**：Agent 可能说"我测试通过了"但实际没跑。Hook 不问 Agent，程序自己跑，退出码无法伪造。
 

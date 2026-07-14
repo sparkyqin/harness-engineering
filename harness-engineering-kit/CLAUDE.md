@@ -70,7 +70,7 @@ Rules（声明意图，可被忽略）→ Skills（SOP，可被跳步）→ Agen
 |---|---|
 | 虚报进展（happy path 跑通就报"完成"） | TE 真实浏览器 E2E + verify.sh + baseline compare |
 | 降低标准改测试 | verify.sh C 类 + test-e2e Skill 从 Scenario 生成用例 |
-| 伪造验证（贴旧日志） | after_subagent hook 程序自跑，退出码说了算 |
+| 伪造验证（贴旧日志） | 子代理停止 hook 程序自跑，退出码说了算 |
 | 错误死磕（围着症状打补丁） | PM 轮次封顶（Dev 5 / 其他 3），超限升级给人 |
 | 小题大做（超范围改动） | proposal 先定"做什么"，RR 拦截超范围方案 |
 | 上下文失忆 | memory/ + specs/ Source of Truth + 每棒文档产出 |

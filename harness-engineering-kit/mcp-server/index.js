@@ -8,7 +8,7 @@
  * 降级：MCP 不可用 → Agent 直接跑 bash（功能等价，只是少了格式化和 schema 校验）。
  *   USB-C 统一了充电口，但没有 USB-C 你的设备照样能充电。
  *
- * 配置（.cursor/mcp.json 或 .claude.json）：
+ * 配置（.cursor/mcp.json 或 .claude/settings.json 的 mcpServers，或 ~/.claude.json）：
  *   { "mcpServers": { "proshop-harness": {
  *       "command": "node", "args": ["mcp-server/index.js"],
  *       "env": { "NODE_ENV": "development" } } } }

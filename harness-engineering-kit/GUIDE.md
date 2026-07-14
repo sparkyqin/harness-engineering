@@ -83,7 +83,7 @@ Dev ──(developer hook verdict=PASS)──> CR ──> TE
 **轮次与回退**：
 
 - Dev 最多 5 轮，CR/TE 各最多 3 轮。超限 → PM 暂停并升级给人。
-- `developer hook`：after_subagent（Developer 停止后）程序自跑 `npm test` + `verify.sh`，followup_message 告知 PM 结果。PM 据此决定是否重拉 Developer。
+- `developer hook`：Developer 停止后程序自跑 `npm test` + `verify.sh`，结果注入主会话（Claude Code `additionalContext` / Cursor `followup_message`）告知 PM。PM 据此决定是否重拉 Developer。
 - `tester hook`：TE 停止后跑测试证据闭环 + verify + baseline compare。
 - `Re-run`：当 board 已是 `AWAITING_ARCHIVE` 却需返工时，PM **禁止改码**，先诊断归属（实现/需求），再调度对应 Worker。
 

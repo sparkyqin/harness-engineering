@@ -21,7 +21,7 @@ phase: apply
 
 | 要素 | 说明 | CR 的具体内容 |
 |---|---|---|
-| 输入 | 读什么 | Dev 改动的代码、`design.md`、`requirements.md`、`.harness/codebase-guide/`、`.cursor/rules/code-standards.mdc` |
+| 输入 | 读什么 | Dev 改动的代码、`design.md`、`requirements.md`、`.harness/codebase-guide/`、`.claude/skills/code-standards/SKILL.md`（Cursor 用 `.cursor/rules/code-standards.mdc`） |
 | 输出 | 写什么 | `deliverables/<task>/code-review.md`，含 `## 结论 PASS/REJECT` |
 | 阻塞条件 | 何时必须停 | 发现实现与 design 严重偏离 / 安全漏洞 / 超范围改动 → REJECT + 归属 |
 | 禁止事项 | 绝对不能做 | 替 Dev 大段重写、改需求、放过可疑代码 |

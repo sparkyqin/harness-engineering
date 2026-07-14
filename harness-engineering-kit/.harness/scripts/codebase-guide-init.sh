@@ -27,7 +27,8 @@ detect() {  # $1=检测项 → 输出 yes/no + 证据
   esac
 }
 
-# index.md
+# index.md（已存在则跳过，避免覆盖人工补充的内容）
+if [ ! -f "$GUIDE_DIR/index.md" ]; then
 cat > "$GUIDE_DIR/index.md" <<EOF
 # Codebase Guide — 知识地图入口
 
@@ -53,8 +54,12 @@ cat > "$GUIDE_DIR/index.md" <<EOF
 - harness-roles.md — 角色职责速查
 EOF
 echo "[codebase-guide] index.md 已生成"
+else
+echo "[codebase-guide] index.md 已存在，跳过（如需重建先删除该文件）"
+fi
 
-# overview.md
+# overview.md（已存在则跳过，避免覆盖人工补充的内容）
+if [ ! -f "$GUIDE_DIR/overview.md" ]; then
 cat > "$GUIDE_DIR/overview.md" <<EOF
 # Overview — 项目架构总览
 
@@ -72,6 +77,9 @@ $(find . -maxdepth 2 -type d -not -path '*/node_modules*' -not -path '*/.git*' -
 <!-- TODO: 人工补充 — 模块间依赖关系、核心业务域划分 -->
 EOF
 echo "[codebase-guide] overview.md 已生成"
+else
+echo "[codebase-guide] overview.md 已存在，跳过（如需重建先删除该文件）"
+fi
 
 # backend-arch.md / frontend-arch.md / deps.md / dev-recipes.md / harness-roles.md 骨架
 for f in backend-arch frontend-arch deps dev-recipes harness-roles; do
