@@ -1,13 +1,18 @@
 #!/usr/bin/env node
 /**
- * tester-evidence.js — after_subagent(test-engineer) hook
+ * tester-evidence.js — Claude Code SubagentStop(test-engineer) hook
  *
- * 触发：TE 子代理停止后。
+ * 触发：TE 子代理停止后（settings.json 的 SubagentStop matcher: test-engineer）。
  * 作用：跑测试证据闭环（check-e2e-evidence + verify + baseline compare），
- *       把结果注入 followup_message。PM 据此判定：
+ *       把结果通过 additionalContext 注入主会话。PM 据此判定：
  *         全 PASS → PM 收尾（check-harness + 模板体检 + board AWAITING_ARCHIVE）
  *         FAIL(实现级) → 打回 Dev
  *         FAIL(需求级) → 升级人 → 改 proposal → 重跑 propose
+ *
+ * Claude Code 协议（与 Cursor 的 after_subagent 不同）：
+ *   stdin:  {"hook_event_name":"SubagentStop","agent_type":"test-engineer", ...}
+ *   stdout: {"decision":"allow","hookSpecificOutput":{
+ *             "hookEventName":"SubagentStop","additionalContext":"<证据闭环文本>"}}
  */
 'use strict';
 const { execFileSync } = require('node:child_process');
@@ -36,8 +41,10 @@ function taskFromBoard() {
 }
 
 const evt = readStdin();
-const resp = { decision: 'allow', followup_message: '' };
-if (evt.agent_name && evt.agent_name !== 'test-engineer') {
+const resp = { decision: 'allow', hookSpecificOutput: { hookEventName: 'SubagentStop', additionalContext: '' } };
+
+// Claude Code 用 agent_type（非 agent_name）
+if (evt.agent_type && evt.agent_type !== 'test-engineer') {
   process.stdout.write(JSON.stringify(resp) + '\n');
   process.exit(0);
 }
@@ -64,7 +71,7 @@ if (task) {
   else baseline = 'FAIL';
 }
 
-resp.followup_message =
+resp.hookSpecificOutput.additionalContext =
   `[tester hook] 证据闭环\n` +
   `  E2E 证据: ${e2e}\n` +
   `  verify.sh: ${verifyPass ? 'PASS' : 'FAIL'}\n` +

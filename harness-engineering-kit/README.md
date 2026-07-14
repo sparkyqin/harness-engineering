@@ -56,25 +56,23 @@ harness-engineering-kit/
 ├── AGENTS.md / CLAUDE.md      ← 项目入口（AI 读的第一份文件）
 ├── GUIDE.md                   ← 工作流总览（propose/apply/archive + 七铁律）
 ├── README.md                  ← 本文件
-├── .cursor/                   ← Cursor IDE 配置（Claude Code 等价见 .claude/）
-│   ├── rules/                 ← 3 个 .mdc（harness-core / code-standards / workflow-discipline）
-│   ├── skills/                ← 4 个 SOP（build-test / post-verify / code-review / test-e2e）
-│   ├── agents/                ← 6 个 Worker 子代理（BA/SA/RR/Dev/CR/TE）
+├── .cursor/                   ← Cursor IDE 配置（rules/skills/agents/commands/hooks/mcp）
+├── .claude/                   ← Claude Code 配置（与 .cursor/ 并行，双 IDE 共存）
 │   ├── commands/              ← 3 个斜杠命令（harness-propose / harness-apply / harness-archive）
-│   ├── hooks.json             ← after_subagent / after_file_edit / before_command
-│   └── mcp.json               ← MCP server 配置
-├── .claude/settings.json      ← Claude Code 等价 hooks 配置
-├── .harness/                  ← 核心工程工作流目录
+│   ├── agents/                ← 6 个 Worker 子代理入口（BA/SA/RR/Dev/CR/TE）
+│   ├── skills/                ← 6 个 skill（4 SOP + code-standards + workflow-discipline）
+│   └── settings.json          ← hooks 配置（SubagentStop / PostToolUse / PreToolUse / SessionStart）
+├── .harness/                  ← 核心工程工作流目录（IDE 无关，单一来源）
 │   ├── agents/                ← 7 个角色定义（含 PM），每个内嵌五要素契约
 │   ├── workflow/              ← transitions.json + flow-definition.md + subagent-orchestration.md
 │   ├── scripts/               ← 10 个脚本（硬门禁 + 脚手架 + 备份）
-│   ├── hooks/                 ← 3 个 hook 实现（verify-after-developer / tester-evidence / guard-dangerous）
+│   ├── hooks/                 ← 4 个 hook 实现（verify-after-developer / tester-evidence / guard-dangerous / format-on-edit）
 │   ├── specs/                 ← 系统能力 Source of Truth（_index + i18n/orders 示例）
 │   ├── deliverables/          ← 任务文档产出 + _template + _archive + user-switch-stale-ui 示例
 │   ├── codebase-guide/        ← 模块化知识地图（6 子文档）
 │   ├── memory/                ← 记忆库（entries + templates + index）
 │   └── board.md               ← 任务看板（状态机真实来源）
-└── mcp-server/index.js        ← 8 个 MCP 工具接口
+└── mcp-server/index.js        ← 8 个 MCP 工具接口（Claude Code 默认未启用，Agent 直接调 bash 等价）
 ```
 
 ## 工作流三步
@@ -109,6 +107,9 @@ harness-engineering-kit/
 | TE | Test Engineer | apply | 旗舰 | test-report.md + 测试代码 |
 
 ## 快速上手
+
+> **Claude Code（Windows）**：在 `harness-engineering-kit/` 目录下 `claude` 启动会话，`/harness-*` 命令即用。脚本走 Git Bash（Windows 原生 cmd 不支持）。依赖：node / npm / bash / git。详见 CLAUDE.md「Claude Code 适配」段。
+> **Cursor**：用 `.cursor/` 配置，命令/代理/skills 在对应目录。
 
 1. **初始化知识地图**（首次）：
    ```bash
