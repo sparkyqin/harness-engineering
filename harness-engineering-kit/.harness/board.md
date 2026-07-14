@@ -11,9 +11,10 @@
 | ID | 任务名 | 阶段 | 状态码 | profile | 结论/备注 |
 |---|---|---|---|---|---|
 | 049 | recent-browse-product-load-fail | 交付完成 | DONE | quick | 已归档至 _archive/2026-07-10-recent-browse-product-load-fail |
-| 050 | user-switch-stale-ui | 交付完成 | AWAITING_ARCHIVE | standard | 含一次 TE FAIL(实现级) 回退 Dev 后重试闭环，待人工审批2 |
+| 050 | user-switch-stale-ui(v1) | 交付完成 | DONE | standard | 首版（静态预生成）已归档至 _archive/2026-07-14-user-switch-stale-ui-pre-rerun；真实重跑见 ID 041 |
 
 <!--
 示例行（仅作格式参考，init-task.sh 会追加真实行）：
 | 019 | user-phone | 交付完成 | AWAITING_ARCHIVE | refactor | 含一次 TE FAIL 回退后重试闭环 |
 | 019 | user-phone | 开发实现 | IN_PROGRESS | refactor | propose 全链路 PASS，待人工审批1 -->
+| 041 | user-switch-stale-ui | 提案 | PENDING | standard | 初始化 |

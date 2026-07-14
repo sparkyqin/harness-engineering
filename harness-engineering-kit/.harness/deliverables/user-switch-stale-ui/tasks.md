@@ -1,17 +1,20 @@
 # Tasks — user-switch-stale-ui
 
-## 1. 登录回调分支修正
+<!-- SA 拆解，Dev 执行。apply 阶段按勾选跟踪进度。任务可被 Dev 一次性执行（无暗知识）。 -->
 
-- [x] 1.1 改登录成功回调：检测本地是否已有界面语言，有则保留、无则用账户语言初始化
-- [x] 1.2 移除 `res.uiLanguage || 'zh'` 对本地语言的强制覆盖
+## 1. 登录成功回调分支修正
 
-## 2. B 类 E2E
+- [x] 1.1 登录成功回调改为按 `hasLocalUiLanguage()` 分支：有本地语言 → 保留、仅更新账户偏好；无本地语言 → `setUiLanguage(res.uiLanguage || 'zh')`（原逻辑）
+- [x] 1.2 自查未改动后端鉴权、未升级依赖、未动 i18n 持久化
 
-- [x] 2.1 补 S-023 用例：john 英文登出 → jane 登录 → Header 保持英文
-- [x] 2.2 补 S-024 用例：首次登录 → 应用账户语言
+## 2. E2E 补充
 
-## 3. 验证闭环
+- [x] 2.1 S-023 换号保留：john 英文登出 → jane 登录 → Header 保持英文
+- [x] 2.2 S-024 首次登录：无本地语言 → jane 登录 → 界面应用 zh
+- [x] 2.3 跑 npm test + verify.sh，结果写入 dev-log
 
-- [x] 3.1 npm test
-- [x] 3.2 verify.sh
-- [x] 3.3 Playwright E2E（ensure-playwright.sh 后跑）
+<!--
+重试记录：
+- 首次 Dev 实现未加分支（仍 `res.uiLanguage || 'zh'` 覆盖）→ developer hook verdict=FAIL → TE B-E2E-13 FAIL(实现级) → 打回 Dev
+- 重试 1：Dev 补分支 → developer hook verdict=PASS (259 passed; verify.sh PASS) → 进 CR
+-->
