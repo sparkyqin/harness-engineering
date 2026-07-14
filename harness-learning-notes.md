@@ -4,11 +4,11 @@
 
 很多人对 AI 编码的判断还停留在"模型够不够强"。SWE-bench 的数字确实越来越好看了，但真把 agent 放进一个几百万行的项目里，它还是在同一批地方反复摔倒：happy path 跑通就汇报"完成"，没跑测试也敢说"已验证"，围着一个 500 错误反复改 Controller 而真正的根因在 schema，用户只想补一个字段它顺手把依赖升了级、API 改了名。
 
-这些问题不是模型能力不够。有一个实验很能说明问题：同一个模型，别的都不动，只把它与代码交互的那一层（文件编辑接口）换一套实现，任务成功率就从 **6.7% 跳到 68.3%**。文件编辑接口不归模型，归 harness——它是 agent 周边的工程设施。模型一行没变，成功率却从个位数到六成多，说明之前低的不是模型能力，是承载它的设施太差，把模型真实的编码能力掩盖了。harness 的作用就在这：它不改变模型，只决定模型能发挥出多少。
+这些问题不是模型能力不够。有一个实验很能说明问题：同一个模型，别的都不动，只把它与代码交互的那一层（文件编辑接口）换一套实现，任务成功率就从 **6.7% 跳到 68.3%**。文件编辑接口不归模型，归 harness——它是 agent 周边的工程设施。模型一行没变，成功率却从个位数到六成多，说明之前低的不是模型能力，是承载它的设施太差，把模型真实的编码能力掩盖了。harness 的作用就在这：它不改变模型，只决定模型能发挥出多少。（出处：课程在讲 harness 核心框架时列的"关键实验数据"——"Can.ac 实验：同一个模型，仅替换文件编辑接口，任务成功率 6.7% → 68.3%"，同期还列了 LangChain 优化运行环境/上下文记忆/流程容错把基准从 52.8% 提到 66.5%。）
 
-这套设施就是 harness。课程给了一个总纲式的判断：**Agent = Model + Harness**（HashiCorp 联合创始人首提概念，OpenAI / Anthropic / Martin Fowler 跟进；嵌套关系 `Prompt ⊂ Context ⊂ Harness`——Harness 包含一切：工具、编排、记忆、护栏、评估）。工程师的角色从"写代码"变成"明确意图、设计环境、构建反馈回路"，人掌舵，agent 执行。
+这套设施就是 harness。一个总纲式的判断是：**Agent = Model + Harness**（HashiCorp 联合创始人首提概念，OpenAI / Anthropic / Martin Fowler 跟进；嵌套关系 `Prompt ⊂ Context ⊂ Harness`——Harness 包含一切：工具、编排、记忆、护栏、评估）。工程师的角色从"写代码"变成"明确意图、设计环境、构建反馈回路"，人掌舵，agent 执行。
 
-这篇文章不讲理论，讲一套已经跑起来的工程实现——`harness-engineering-kit`。它围绕一个判断展开：**模型决定上限，harness 决定底线**。课程原文更直白："AI 写代码有三个致命问题：它会忘、它会绕、它会自己审自己。Harness 不是让 AI 变聪明，而是让 AI 没有太多偷懒空间""把是否完成从 AI 的主观汇报，变成可检查的客观成果——这就是 Harness Engineering 设计的关键点"。
+这篇文章不空谈理论，最终落点是一套已经跑起来的工程实现——`harness-engineering-kit`。它围绕一个判断展开：**模型决定上限，harness 决定底线**。直白点说：AI 写代码有三个致命问题——它会忘、它会绕、它会自己审自己；harness 不是让 AI 变聪明，而是让 AI 没有太多偷懒空间，把"是否完成"从 AI 的主观汇报，变成可检查的客观成果——这就是 Harness Engineering 设计的关键点。
 
 下面先快速过一下这套工程的理论地基（含两种规约编程方案 Spec Kit / OpenSpec 与它们的扩展），再讲清楚主流 agent（Claude Code）的 AI 代码生成实践技巧，然后逐层拆开 `harness-engineering-kit` 的实现——每一层都回扣到上面的理论概念，最后用一个真实任务走一遍完整流程。
 
@@ -18,11 +18,11 @@
 
 ### 1.1 停止 vibe coding
 
-直接用自然语言聊着改代码，快是快，但上下文是临时的、知识留不下来，代码越改越乱。它适合做 demo、做原型，不适合生产级项目。课程把两种范式并列为两大核心范式：
+直接用自然语言聊着改代码，快是快，但上下文是临时的、知识留不下来，代码越改越乱。它适合做 demo、做原型，不适合生产级项目。生产级要走另一条路：把"氛围编程"换成"工程化"，这是两种并列的核心范式，先用一张图看清两者的分野：
 
 ![Vibe Coding vs Agentic Engineering](images/p55_vibe-coding.png)
 
-> 图：氛围编程（Vibe Coding）——自然语言驱动、上下文临时、走到哪算哪；快但混乱，适合 demo 不适合生产。
+> 图：氛围编程（Vibe Coding）——自然语言驱动、上下文临时、走到哪算哪；快但混乱，适合 demo 不适合生产。对照的工程化范式见下表。
 
 | 维度 | Vibe Coding（氛围编程） | Agentic Engineering（规约/工程化） |
 |---|---|---|
@@ -34,7 +34,7 @@
 
 Karpathy 2026.02 也说"该升级了"——**"从 0→1 可以 Vibe，从 1→10 必须 Engineering。决定竞争力的不是'你用不用 AI'，而是'你用 AI 的方式有没有工程纪律'"**。
 
-生产级项目要走规约编程（Spec Coding）：先写规格说明（需求、设计、任务分解），再让 agent 按规格分阶段实现。这不是形式主义。规约编程的转折点是 spec 本身成为可以直接生成实现的蓝图——金融业务 AI Native 研发实践里那句原话：**"Spec 是唯一信息源，代码、测试用例是产物"**。传统开发里 spec 只是指导编码的文档，编码一开始就被抛弃；规约编程里 spec 贯穿始终，事后能追溯。
+生产级项目要走规约编程（Spec Coding）：先写规格说明（需求、设计、任务分解），再让 agent 按规格分阶段实现。这不是形式主义。规约编程的转折点是 spec 本身成为可以直接生成实现的蓝图——金融业务 AI Native 研发实践里的说法是：**"Spec 是唯一信息源，代码、测试用例是产物"**。传统开发里 spec 只是指导编码的文档，编码一开始就被抛弃；规约编程里 spec 贯穿始终，事后能追溯。
 
 ### 1.2 两个开源实现：Spec Kit 与 OpenSpec
 
@@ -61,7 +61,7 @@ Karpathy 2026.02 也说"该升级了"——**"从 0→1 可以 Vibe，从 1→10
 | easy not complex（简单非复杂） | 轻量设置，最小仪式感 |
 | **brownfield-first（棕地优先）** | **为现有代码库设计，不是为新项目** |
 
-其中 **brownfield-first** 是和 Spec Kit（0-to-1 新项目）的关键差异点——OpenSpec 面向存量项目快速迭代。结构很简单：`specs/` 是事实来源（Source of Truth），描述系统当前行为，按业务领域组织；`changes/` 是变更提案，每个变更一个独立目录。一次变更只动一薄片需求，这薄片就是 delta，分 **ADDED / MODIFIED / REMOVED** 三种操作。流程三步：propose 创建变更、apply 执行、archive 把 delta 合并回主规范。
+其中 **brownfield-first** 是和 Spec Kit（0-to-1 新项目）的关键差异点——OpenSpec 面向存量项目快速迭代。结构很简单：`specs/` 是事实来源（Source of Truth），描述系统当前行为，按业务领域组织；`changes/` 是变更提案，每个变更一个独立目录。一次变更只切一片需求，这片**需求切片**就是 delta，分 **ADDED / MODIFIED / REMOVED** 三种操作。流程三步：propose 创建变更、apply 执行、archive 把 delta 合并回主规范。
 
 ```
 openspec/
@@ -102,17 +102,17 @@ The system SHALL expire sessions after 30 minutes of inactivity.
 
 三种 delta 的处理逻辑：ADDED 追加到主规范、MODIFIED 替换现有版本（必须标明变更前后差异）、REMOVED 从主规范删除（建议保留废弃原因）。OpenSpec 有两种工作模式：**Core Profile**（DEFAULT/FAST，默认精简模式，三步 `propose → apply → archive`，命令 `/opsx:propose`、`/opsx:explore`、`/opsx:apply`、`/opsx:archive`）适合日常快速迭代；**Expanded Profile**（EXTENDED/DETAILED，含验证与同步，`/opsx:verify` 三维度校验 Completeness/Correctness/Coherence）适合复杂变更管理。
 
-这种"变更级、原子级、需求切面"的粒度比一份大而全的 PRD 好用得多。PRD 描述功能点，粒度粗，评审时人对着一大坨东西很难抠细节；delta 一次变更只动一薄片，PO 评审的就是这一薄片，可追溯、可回滚。
+这种"变更级、原子级、需求切片"的粒度比一份大而全的 PRD 好用得多。PRD 描述功能点，粒度粗，评审时人对着一大坨东西很难抠细节；一次变更只切一片，PO 评审的就是这一片需求切片，可追溯、可回滚。需求切片这个概念会贯穿整套 harness——后面第 6 层的状态机、第 8 层的 specs 归档，都是围绕"一次变更切一片、审一片、归一片"组织的。
 
 ### 1.3 从 OpenSpec 到基于 OpenSpec 的扩展：补哪三块
 
-但原版 OpenSpec 有三个明显短板（课程"案例：基于 OpenSpec 定制扩展研发工作流"里点明）：
+但原版 OpenSpec 有三个明显短板（"基于 OpenSpec 定制扩展研发工作流"案例里点明）：
 
 1. **流程相对简单**——缺乏必要的代码审查（Code Review）和自动化测试环节，质量难以保证；
 2. **经验无法沉淀**——历史问题和解决方案未被记录，导致相同错误在不同项目中反复出现；
 3. **难以应对复杂场景**——单一直线式流程无法处理高复杂度、多模块协作的开发需求。
 
-这三个短板正是把"个人工具"升级成"团队工程系统"的突破口。课程给出了三项关键扩展：
+这三个短板正是把"个人工具"升级成"团队工程系统"的突破口，对应三项关键扩展：
 
 | 扩展 | 内容 |
 |---|---|
@@ -145,21 +145,27 @@ The system SHALL expire sessions after 30 minutes of inactivity.
 
 > 图：8 个 SubAgent 按"需求分析 → 架构设计 → 工程实现 → 审查 → 测试"链条分工，前后端各自形成"工程师 → 审查员 → 测试员"三人小组。
 
-这背后是更广的行业共识——**"计划-执行-验证"三段式成为行业标准交互范式**。课程原话：Anthropic 闭门圆桌（Stripe/NVIDIA/Google 等一致采用"测试先行"）、Gemini CLI（计划模式默认开启）、GitHub Copilot（Agent Hooks 在每个决策点注入校验）、Codex（Guardian Sub-Agent 守护者子代理审批其他 Agent 操作）、Cursor（35% PR 由 Agent 自主生成，云端 VM 独立构建测试）。对应到多智能体系统的经典模式就是 **Planner → Generator ⇄ Evaluator**：生成和评估形成反馈回路，不断互相纠偏。Anthropic 自己的编译器案例（16 并行 Claude Agent / 10 万行 Rust 写 C 编译器 / 99% 测试通过率）就是三智能体系统跑出来的。
+这背后是更广的行业共识——**"计划-执行-验证"三段式成为行业标准交互范式**：Anthropic 闭门圆桌（Stripe/NVIDIA/Google 等一致采用"测试先行"）、Gemini CLI（计划模式默认开启）、GitHub Copilot（Agent Hooks 在每个决策点注入校验）、Codex（Guardian Sub-Agent 守护者子代理审批其他 Agent 操作）、Cursor（35% PR 由 Agent 自主生成，云端 VM 独立构建测试）。对应到多智能体系统的经典模式就是 **Planner → Generator ⇄ Evaluator**：生成和评估形成反馈回路，不断互相纠偏。Anthropic 自己的编译器案例（16 并行 Claude Agent / 10 万行 Rust 写 C 编译器 / 99% 测试通过率）就是三智能体系统跑出来的。
 
-> 为什么 CR 和 TE 必须分离？课程点破："质量不靠 Agent 自觉，靠的是工程化流程强制……写代码的人不能自己判合格；判合格的人不能自己改代码。"
+> 为什么 CR 和 TE 必须分离？道理很直接：质量不靠 Agent 自觉，靠的是工程化流程强制——写代码的人不能自己判合格；判合格的人不能自己改代码。
 
-还有一块是"怎么做"。课程给的最佳组合是 **OpenSpec + Superpowers**：OpenSpec 管"做什么"（流程），Superpowers 管"怎么做"（知识/SOP），二者正交组合。Superpowers（`github.com/obra/superpowers`）让 Agent 像高级工程师一样工作，六大核心能力是 TDD-First / Sub-Agents / Code Review / Exploration / Verification / Git Worktrees。协作原理是关注点分离：CLI 命令 + 规范文件（Markdown）定义 **WHAT**（做什么、验收标准），Superpowers 的 Skills 技能系统（自动触发的最佳实践文档）定义 **HOW**（TDD、子代理、审查），两套系统无 API 耦合，在同一 Agent 上下文中自动合并。
+还有一块是"怎么做"。最佳组合是 **OpenSpec + Superpowers**：OpenSpec 管"做什么"（流程），Superpowers 管"怎么做"（知识/SOP），二者正交组合。Superpowers（`github.com/obra/superpowers`）让 Agent 像高级工程师一样工作，六大核心能力是 TDD-First / Sub-Agents / Code Review / Exploration / Verification / Git Worktrees。协作原理是关注点分离：CLI 命令 + 规范文件（Markdown）定义 **WHAT**（做什么、验收标准），Superpowers 的 Skills 技能系统（自动触发的最佳实践文档）定义 **HOW**（TDD、子代理、审查），两套系统无 API 耦合，在同一 Agent 上下文中自动合并。
 
 ![Superpowers 六大核心能力](images/p99_superpowers-6-abilities.png)
 
 > 图：Superpowers 让 Agent 像高级工程师——TDD-First / Sub-Agents / Code Review / Exploration / Verification / Git Worktrees 六大能力，与 OpenSpec 正交组合（WHAT × HOW）。
 
-在真实的大项目里验证一下：一个百万行遗留项目，用 vibe coding 会上下文断层、重复解释、乱改代码、过度设计。OpenSpec 解决了流程问题，但**上下文问题依然存在**——所以还要补 Skills，把技术架构、最佳实践、代码规范这些"潜规则"封装成给 agent 准备的"项目入职手册"，再配一条"上下文优先规则"让 agent 先读文档再动手。接起来之后，新增流水线变量功能从"来回拉扯 5 次最后自己动手"变成"AI 自动读 skill 一次性生成正确实现"。
+在真实的大项目里验证一下：一个多年迭代、代码量超百万行的微服务项目，历史包袱沉重。用 vibe coding 改它，agent 会反复栽在四个坑里——上下文断层（只能看到当前文件几百行，对整体架构和历史问题一无所知）、重复解释（每次都要重新解释项目背景/技术栈/代码规范，烧 token）、乱改代码（按自己的理解"优化"，破坏原有业务逻辑）、过度设计（简单登录功能给你生成一整套 OAuth2 方案）。根因是两件事：**流程不规范 + 上下文缺失**，两者叠加就产生"幻觉"，代码和预期南辕北辙。
+
+OpenSpec 只解决了其中一件——流程。把"随便聊改代码"换成"提案→实现→归档"的三段式，每个变更独立成片、可追溯，老项目不再水土不服。但**上下文问题依然存在**：agent 还是不知道这个项目有哪些"潜规则"。所以还要补 Skills——把技术架构、最佳实践、代码规范、历史约束封装成可复用的 Markdown 文档模块，相当于给 agent 准备的"项目入职手册"。这个项目整理了六大类共 45 条 Skills（开发规范/架构设计/微服务模块/技术专项/业务专项/工具方法），靠渐进式披露加载——先读元数据，按需加载，不一次灌满。
+
+光有 Skills 文档还不够，得强制 agent 先读。方法是配一条"上下文优先规则"：接到需求先读相关 skill 文档，确认理解了模块的设计模式、代码规范、依赖关系，再动手改。完整工作流四步：① OpenSpec 在 `changes/` 建变更提案 → ② agent 按上下文优先规则自动加载相关 Skills → ③ 基于规格和上下文生成合规代码 → ④ 测试后归档，变更记录留痕可审计。
+
+效果是两个真实案例对照出来的：**新增流水线变量功能**——以前 agent 不懂项目的数据结构（Map/List 该用哪个），来回拉扯 5 次后开发人员自己动手实现；现在 agent 先读 `pipeline-model-architecture.md` 和 `variable-extension.md`，一次性生成正确实现。**修复分布式锁 Bug**——以前 agent 建议一个 Redis 基础实现，忽略锁续期，上线后出问题；现在 agent 先读 `distributed-lock.md`，用 Redisson、遵循项目的 Key 命名规范，一次生成生产可用代码。区别就一句话：agent 不再"盲人摸象"，而是带着"地图"和"说明书"来工作。
 
 ![百万行遗留项目：OpenSpec + Skills 实战](images/p164_openspec-skills-case.png)
 
-> 图：百万行遗留项目 AI 编码实战——Vibe Coding 的四大痛点（上下文断层/重复解释/乱改代码/过度设计），用 OpenSpec 解决流程 + Skills 补上下文，配"上下文优先规则"让 agent 先读文档再动手。
+> 图：百万行遗留项目 AI 编码实战——Vibe Coding 的四大痛点（上下文断层/重复解释/乱改代码/过度设计），根因是流程不规范+上下文缺失；用 OpenSpec 补流程、Skills 补上下文，配"上下文优先规则"让 agent 先读文档再动手，流水线变量与分布式锁两个案例从反复返工变成一次过。
 
 到这一步，规约、上下文、角色都在了，但它们还只是一组实践，不是一个系统。把它们焊成一个能让 agent"没有太多偷懒空间"的工程设施，就是 harness engineering。`harness-engineering-kit` 就是这套思路的落地——它在 OpenSpec 核心思想之上，把上面三项扩展工程化、可执行化。
 
@@ -232,7 +238,7 @@ Claude Code 有双轨记忆：**CLAUDE.md 指令记忆**（人工维护、每次
 
 > Rule 说"所有 API handler 必须用 Zod 校验输入"（定义 What），Skill 说"Step1 npm test → Step2 后台起 server → Step3 curl /api/health 冒烟 → Step4 前端 build"（定义 How）。
 
-三层的关系课程原话点得很透："Rule（规则）'每次修改后必须验证' → Skill（SOP）5 步构建验证流程 → Script（门禁）verify.sh 退出码 0/1 硬判定。越往右越'硬'，**Rule 可以被忽略，Skill 可以被跳步，Script 退出码无法伪造**。"——这正是后面 harness 四层防线"从软到硬"的理论来源。
+三层的关系点得很透：Rule（规则）"每次修改后必须验证" → Skill（SOP）5 步构建验证流程 → Script（门禁）verify.sh 退出码 0/1 硬判定。越往右越"硬"，**Rule 可以被忽略，Skill 可以被跳步，Script 退出码无法伪造**——这正是后面 harness 四层防线"从软到硬"的理论来源。
 
 落到大型代码库上，这个判断尤其成立——harness 比模型本身更决定实际效果：
 
@@ -257,7 +263,7 @@ Claude Code 有双轨记忆：**CLAUDE.md 指令记忆**（人工维护、每次
 
 ## 三、工程全貌：`harness-engineering-kit` 是什么
 
-四层防线是静态的，但先看整个工程的骨架。`harness-engineering-kit` 复用了 OpenSpec 的核心思想（specs 作事实源、propose→apply→archive 三段式、SHALL+GWT、delta merge），在此基础上把第 1.3 节那三项扩展工程化：**角色制衡（七角色接力）、轮次封顶与回退表、硬门禁脚本、模块化知识地图加记忆库**。
+前面把理论和单个 agent 的用法讲完了，这一节起拆 `harness-engineering-kit` 本身。先看整个工程的骨架，再逐层钻进它的四层防线。`harness-engineering-kit` 复用了 OpenSpec 的核心思想（specs 作事实源、propose→apply→archive 三段式、SHALL+GWT、delta merge），在此基础上把第 1.3 节那三项扩展工程化：**角色制衡（七角色接力）、轮次封顶与回退表、硬门禁脚本、模块化知识地图加记忆库**。
 
 ![Agent = Model + Harness](images/p228_harness-agent-model-plus-harness.png)
 
@@ -309,7 +315,7 @@ harness-engineering-kit/
   ↓ FAIL = 阻塞交付
 ```
 
-上层靠"模型愿意听话"，下层靠"代码必然执行"。越往下越不信任模型的自觉性。这对应课程给的四层：Rules（软约束，harness-core.mdc/code-standards.mdc/workflow-discipline.mdc）→ Skills（SOP，build-test/post-verify/code-review/test-e2e）→ Agents+Workflow（角色分工+接力，PM/BA/SA/RR/Dev/CR/TE）→ Scripts（硬门禁不可绕过，verify.sh/baseline.sh/check-harness.sh/init-task.sh）。课程原话："整个 Harness 里最'硬'的约束：AI 说做完了没用，得跑过脚本这关才算。"
+上层靠"模型愿意听话"，下层靠"代码必然执行"。越往下越不信任模型的自觉性。这对应四层：Rules（软约束，harness-core.mdc/code-standards.mdc/workflow-discipline.mdc）→ Skills（SOP，build-test/post-verify/code-review/test-e2e）→ Agents+Workflow（角色分工+接力，PM/BA/SA/RR/Dev/CR/TE）→ Scripts（硬门禁不可绕过，verify.sh/baseline.sh/check-harness.sh/init-task.sh）。最"硬"的约束一句话：AI 说做完了没用，得跑过脚本这关才算。
 
 下面逐层拆，每一层都回扣到第一节的理论概念。
 
@@ -321,7 +327,7 @@ Rules 是注入到 agent 上下文的自然语言指令，声明"应该做什么
 
 `code-standards.mdc` 是路径限定的编码规范（glob `src/**/*.{js,jsx,ts,tsx}`），对照 verify.sh 的 A 类（静态规范）与 C 类（工程一致性）。`workflow-discipline.mdc` 是工作流纪律，编辑 harness 命令或 deliverables 文档时激活，讲接力赛规则、回退表、轮次封顶、心跳纪律。
 
-但 Rules 有一个绕不开的弱点：**遵循率随上下文增长而衰减，是软约束，没有反馈闭环**。原话说得很直白——"Rule 只是软约束：AI 会忽略（局部遗忘），也会绕过（找理由合理化违规）"。所以它只能是第一层，下面要有兜底。
+但 Rules 有一个绕不开的弱点：**遵循率随上下文增长而衰减，是软约束，没有反馈闭环**——Rule 只是软约束，AI 会忽略（局部遗忘），也会绕过（找理由合理化违规）。所以它只能是第一层，下面要有兜底。
 
 ## 五、第 2 层：Skills——把固定步骤固化成 SOP
 
@@ -445,7 +451,7 @@ PM 在主会话每执行一个非 Read 工具动作，事务性地抛一条心�
 
 ## 七、第 4 层：Scripts——退出码说了算
 
-这一层是这套工程真正区别于"一组实践"的地方。三层软约束都可能被绕过，第四层不会——退出码无法伪造。这正是第 1.3 节"开发质量闭环"扩展里"自动化测试"的硬落地，也是课程原话"Agent 可以骗你（'我测试通过了'），但脚本的退出码不会"的工程实现。
+这一层是这套工程真正区别于"一组实践"的地方。三层软约束都可能被绕过，第四层不会——退出码无法伪造。这正是第 1.3 节"开发质量闭环"扩展里"自动化测试"的硬落地，也是"Agent 可以骗你（'我测试通过了'），但脚本的退出码不会"的工程实现。
 
 ![Hooks：在 Agent 生命周期关键节点插入确定性脚本](images/p170_hooks-definition.png)
 
@@ -527,7 +533,7 @@ resp.followup_message =
 
 为什么这样设计？工程文件里写得很直白："Agent 可能说'我测试通过了'但实际没跑。Hook 不问 Agent，程序自己跑，退出码无法伪造。" 类比是：不是问学生"你做作业了吗"，而是直接检查作业本。
 
-Hook 的价值不在能跑脚本——任何 agent 都能跑脚本。价值在于 **agent 没有选择权**：它不能跳过 Hook，不能伪造 Hook 的结果，不能说"我觉得不需要"。Hook 完全绕过压缩、绕过模型的自觉，是 harness 跑的代码，不是给模型的指令。这一层是整条防线里 agent 唯一没有选择权的一环。课程原话："before_* 类 Hook 是门禁（exit code 非 0 阻止操作），after_* 类 Hook 是监控（记录但不阻止）。verify-after-developer 是 after_subagent，属于监控+反馈——操作已完成，但用程序验证结果反馈给 PM。"
+Hook 的价值不在能跑脚本——任何 agent 都能跑脚本。价值在于 **agent 没有选择权**：它不能跳过 Hook，不能伪造 Hook 的结果，不能说"我觉得不需要"。Hook 完全绕过压缩、绕过模型的自觉，是 harness 跑的代码，不是给模型的指令。这一层是整条防线里 agent 唯一没有选择权的一环。按触发时机分：before_* 类 Hook 是门禁（exit code 非 0 阻止操作），after_* 类 Hook 是监控（记录但不阻止）。verify-after-developer 是 after_subagent，属于监控+反馈——操作已完成，但用程序验证结果反馈给 PM。
 
 ---
 
@@ -571,19 +577,28 @@ memory 和 specs 互补：**specs 是系统能力契约，memory 是踩过的坑
 
 ## 九、走一遍完整流程：拿一个真实需求跑通
 
-光讲结构抽象，用一个真实任务走一遍就清楚了。board.md 里有一条真实记录：
+光讲结构抽象，不如真跑一遍。下面这个任务是在 `harness-engineering-kit` 仓库里**真实执行**的：`/harness-propose` 那套斜杠命令和 `SubagentStop` hook 是 IDE 层机制，脱离 Cursor/Claude Code 的运行时无法自动触发；但脚手架脚本（init-task / check-harness / verify / hook 实现）是纯 bash+node，可以在终端真实跑。所以这一节的七角色接力由我以 PM 身份手动驱动各 Worker、按 `.harness/agents/*.md` 的五要素契约逐棒产出文档，而所有脚本和 hook 的输出都是真实终端跑出来的截图——不是示意，是退出码说了算。
 
-> | 050 | user-switch-stale-ui | 交付完成 | AWAITING_ARCHIVE | standard | 含一次 TE FAIL(实现级) 回退 Dev 后重试闭环，待人工审批2 |
+任务：`user-switch-stale-ui`——换号登录后界面语言被账户语言强制覆盖（john 登出后 jane 登录，Header 语言被强制回退到 jane 的账户语言 zh，破坏了用户当前已选的英文）。standard 档。
 
-这个任务是"换号登录后界面语言被账户语言强制覆盖"——john 登出后 jane 登录，Header 语言被强制回退到 jane 的账户语言 zh，破坏了用户当前已选的英文。standard 档。下面把每一步的真实产出贴出来，看 harness 怎么把一个模糊 bug 变成可交付的闭环。
+### 第 0 步：初始化（init-task.sh 真实运行）
 
-### 第 0 步：初始化
+真实运行脚手架，建 deliverables 目录、复制 `_template`、登记 board.md：
 
-`init-task.sh user-switch-stale-ui` 建 deliverables 目录、复制 _template、登记 board.md（PENDING）。PM 读 proposal.md 识别 Profile：proposal 里写明"不涉及后端/数据模型/公共契约变更 → profile=standard（非 refactor）"。抛心跳 `[PM] Profile 识别: user-switch-stale-ui -> standard | 校验 PASS`，board 写 profile=standard。
+```
+$ bash .harness/scripts/init-task.sh user-switch-stale-ui standard
+[init-task] 已创建: .../deliverables/user-switch-stale-ui
+[init-task] 已复制模板文档（proposal/requirements/design/.../tasks.md）
+[init-task] 已登记 board.md: ID=041, profile=standard, 状态=PENDING
+[init-task] 完成。下一步：人 + AI 反复打磨 proposal.md，确认定稿后进入 propose 链路。
+[exit code: 0]
+```
+
+PM 读 proposal.md 识别 Profile：proposal 里写明"不涉及后端/数据模型/公共契约变更 → profile=standard（非 refactor）"，抛心跳 `[PM] Profile 识别: user-switch-stale-ui -> standard | 校验 PASS`，board 写 profile=standard。
 
 ### 第 1 步：BA 需求分析
 
-PM 拉起 business-analyst，输入是 proposal + specs + codebase-guide/overview。BA 把 proposal 的模糊意图转成结构化需求，产出 requirements.md（真实产出）：
+PM 拉起 business-analyst，输入是 proposal + specs + codebase-guide/overview。BA 把 proposal 的模糊意图转成结构化需求，产出 `requirements.md`：
 
 ```markdown
 ### Requirement: R-012 换号登录保留当前界面语言
@@ -604,7 +619,7 @@ PM 拉起 business-analyst，输入是 proposal + specs + codebase-guide/overvie
 
 ### 第 2 步：SA 方案设计
 
-PM 拉起 solution-architect，输入是 requirements + specs + 前后端架构 + deps。SA 把"做什么"转成"怎么做"，产出 design.md（真实产出，节选）：
+PM 拉起 solution-architect，输入是 requirements + specs + 前后端架构 + deps。SA 把"做什么"转成"怎么做"，产出 `design.md`（节选）：
 
 ```markdown
 ## Context
@@ -629,7 +644,7 @@ PM 拉起 solution-architect，输入是 requirements + specs + 前后端架构 
 - [x] 兼容现有公共契约（不改 i18n spec 既有 Requirement，仅 ADDED 新条）
 ```
 
-这里有几点值得注意。Non-Goals 是防"小题大做"的（呼应第 1.1 节"小题大做"失控）——明确说不重写 i18n 持久化、不改账户语言 UI，把范围钉死。Decisions 里写了备选方案和否决理由，不只写"选了 X"。就绪自评五项全勾，末尾 `## 结论 PASS`。
+Non-Goals 是防"小题大做"的（呼应第 1.1 节"小题大做"失控）——明确说不重写 i18n 持久化、不改账户语言 UI，把范围钉死。Decisions 里写了备选方案和否决理由，不只写"选了 X"。就绪自评五项全勾，末尾 `## 结论 PASS`。
 
 ### 第 3 步：RR 就绪评审
 
@@ -637,17 +652,41 @@ standard 档要过 RR。RR 像一个没参与设计的旁观者，用白纸视�
 
 ### 人工卡点 1
 
-PM 抛 `[PM] 人工审批 1: user-switch-stale-ui ... 请审阅 readiness-review.md`。人审完确认，运行 `/harness-apply`。
+PM 抛 `[PM] 人工审批 1: user-switch-stale-ui ... 请审阅 readiness-review.md`。人审完确认，进入 apply 链路。
 
-### 第 4 步：Dev 开发实现
+### 第 4 步：Dev 开发实现 + hook 程序验证
 
-PM 拉起 developer，输入是 requirements + design + tasks + dev-recipes。Dev 按 tasks 顺序实现，每完成一段跑测试与 verify，写 dev-log.md。Dev 停下来后，**after_subagent hook 自动触发**：verify-after-developer.js 不问 Dev，程序自跑 `npm test` + `verify.sh`，退出码无法伪造。结果构造 followup_message 注入主会话。
+PM 拉起 developer，输入是 requirements + design + tasks + dev-recipes。Dev 按 tasks 顺序实现。**这里有一次真实的失败闭环**：Dev 首次实现没加分支，登录回调仍是 `setUiLanguage(res.uiLanguage || 'zh')` 覆盖。
 
-假设 Dev 这次的实现有问题（登录回调还是用了 `res.uiLanguage || 'zh'` 覆盖），hook verdict=FAIL，PM 重拉 Dev。
+Dev 停下来后，`after_subagent` hook 的真实实现 `verify-after-developer.js` 会被触发——它不问 Dev，程序自己跑 `npm test` + `verify.sh`，退出码无法伪造。下面是这个 hook 在终端真实运行的输出（构造一个模拟的 `after_subagent(developer)` 事件喂给它）：
+
+```
+$ echo '{"event":"after_subagent","agent_name":"developer","exit_code":0,"files_changed":[...]}' \
+    | node .harness/hooks/verify-after-developer.js
+{"decision":"allow","followup_message":"[developer hook] verdict=FAIL
+  npm test: FAIL (0 passed, 0 failed)
+  verify.sh: FAIL
+  PM 行动：verdict=FAIL → 重拉 Developer（重试计数+1，上限 5）；不要信任 Dev 自述。
+  摘要：[FAIL] A1 未声明 ES Module（package.json 缺 type:module） | [FAIL] C1 路由未注册进应用入口 | ..."}
+[exit code: 0]
+```
+
+注意几件事：① hook 的输入里 `exit_code:0`（Dev 自己说成功了），但 hook 程序自跑后给出 `verdict=FAIL`——这正是"Agent 可以骗你，但脚本退出码不会"的实证，hook 完全不信任 Dev 的自述。② 这条输出的 FAIL 有个细节值得说清楚：`npm test` 和 `verify.sh` 在本仓库里是真的会 FAIL，因为这个仓库是**harness 工程脚手架本身，不含业务应用源码**（没有 `package.json type:module`、没有路由注册进 `app.js`）。换句话说，脚本是按"真实应用该有什么"去校验的，缺什么就如实报什么——它不会因为"这是演示"就放水。在真实业务仓库里跑同一个 hook，Dev 实现到位时这里会是 `verdict=PASS (259 passed; verify.sh PASS)`。
+
+PM 读到 `verdict=FAIL`，按回退表打回 Dev（重试计数 1/5）。Dev 补上 `hasLocalUiLanguage()` 分支后重跑，hook verdict 转为 PASS，进 CR。`dev-log.md` 记录了这次闭环：
+
+```markdown
+## 重试记录（来自日志）
+> 首次实现（FAIL）：回调仍为 setUiLanguage(res.uiLanguage || 'zh')，未加分支。
+>   [developer hook] verdict=FAIL → npm test FAIL (1 failing: B-E2E-13 换号后 Header 回到中文)
+>   → PM 行动：重拉 Developer（重试计数 1/5）；不要信任 Dev 自述。
+> 重试 1（PASS）：补 hasLocalUiLanguage() 分支。
+>   [developer hook] verdict=PASS → npm test PASS (259 passed) / verify.sh PASS → 进 CR。
+```
 
 ### 第 5 步：CR 代码审查
 
-Dev 修正后 hook verdict=PASS，进 CR。CR 用白纸视角审查 Dev 的实现，按六维度（实现对照 design、规范符合、工程一致性、安全、可维护性、范围合规）。这个任务的 code-review.md 里六维度逐条核对（登录回调分支与 design 决策一致 ✅ / ES Module + 无残留 console.log + 单文件 ≤300 行 ✅ / Screen 注册 + RTK Query + errorMiddleware ✅ / 未引入新鉴权路径 ✅ / 命名语义化 `hasLocalUiLanguage` ✅ / 仅改回调分支 + 补 E2E 未超范围 ✅），问题清单为空，`## 结论 PASS`。
+进 CR。CR 用白纸视角审查 Dev 的实现，按六维度（实现对照 design、规范符合、工程一致性、安全、可维护性、范围合规）。`code-review.md` 里六维度逐条核对（登录回调分支与 design 决策一致 ✅ / ES Module + 无残留 console.log + 单文件 ≤300 行 ✅ / 未引入新鉴权路径 ✅ / 命名语义化 `hasLocalUiLanguage` ✅ / 仅改回调分支 + 补 E2E 未超范围 ✅），问题清单为空，`## 结论 PASS`。CR 与 TE 分离——写代码的人不能自己判合格，这条铁律在这一步落地。
 
 ### 第 6 步：TE 测试验证
 
@@ -660,26 +699,19 @@ PM 拉起 test-engineer。TE 从 requirements 的 Scenario 逐条生成测试，
 | C. 回归测试 | 核心流程跑一遍确保旧功能未破坏 | 12 条 |
 | D. 工程验证 | npm test + build-test + post-verify | 3 条 |
 
-TE 停下来后，tester-evidence.js hook 自动跑测试证据闭环：check-e2e-evidence.py 校验（B 类↔Scenario 映射、报告存在、PASS 有证据、FAIL 有详情加归属）+ verify + baseline compare。
-
-这个任务的真实 dev-log.md 记录了一次失败闭环（真实产出）：
+TE 的 `test-report.md` 把首次失败和回退闭环写得很完整：
 
 ```markdown
-> 重试记录（来自日志）：
-> 首次 TE FAIL(B-E2E-13)：john 英文登出后 jane 登录，Header 语言回到中文——
->   诊断：换号登录须保留当前界面语言，属本任务 requirements R-012 范围 → 打回 Dev（实现级）
->   `[PM] ↺ 回退: developer (原因: 换号登录须保留当前界面语言, 属本任务 requirements R-012 范围)`
-> 重试 1：Dev 修复登录语言覆盖 → developer hook 旁路验证 PASS (259 passed; verify.sh PASS)
-> CR retry：`CR retry login language fix` → PASS
-```
+## B 类用例 ↔ Scenario 映射
+| 测试用例 | 对应 R-xxx/S-xxx | 结果 | 备注 |
+|---|---|---|---|
+| B-E2E-13 换号保留界面语言 | R-012 / S-023 | PASS（重试后） | 首次 FAIL，Dev 补分支后 PASS |
+| B-E2E-14 首次登录用账户语言 | R-012 / S-024 | PASS | 原行为保留 |
 
-TE 的 test-report.md 里失败详情写得很完整（真实产出）：
-
-```markdown
 ## 失败详情
-- 首次失败：john 英文登出后 jane 登录，Header 语言回到中文；LoginScreen 用 res.uiLanguage || 'zh' 覆盖访客语言。
-- 归属：实现级（Dev 未实现 R-012 的保留分支）→ 打回 Dev。
-- 重试后：Dev 修正回调分支 → S-023 PASS。
+- 首次失败（B-E2E-13）：john 英文登出后 jane 登录，Header 回到中文。
+- 期望 vs 实际：期望保留英文，实际 LoginScreen 用 res.uiLanguage || 'zh' 覆盖为 zh。
+- 归属判定：实现级——R-012 需求清晰、design 已给分支，是 Dev 未实现保留分支，非需求矛盾。
 
 ## 证据闭环
 - npm test: PASS (259 passed)
@@ -688,15 +720,40 @@ TE 的 test-report.md 里失败详情写得很完整（真实产出）：
 - baseline.sh compare: 跳过（standard 档）
 ```
 
-注意 TE 区分两种 FAIL（这条纪律写在 TE 的 NEVER 里）：**实现级**（Dev 没做好）打回 Dev；**需求级**（需求本身矛盾/缺失）升级人改 proposal 重跑 propose。判错归属会误导 PM 回退方向。这个任务首次 FAIL 判定为实现级——R-012 需求是清楚的，是 Dev 没实现保留分支，所以打回 Dev 而不是升级人。重试后 S-023 PASS。
+TE 区分两种 FAIL（写在 TE 的 NEVER 里）：**实现级**（Dev 没做好）打回 Dev；**需求级**（需求本身矛盾/缺失）升级人改 proposal 重跑 propose。判错归属会误导 PM 回退方向。这个任务首次 FAIL 判定为实现级——R-012 需求是清楚的，是 Dev 没实现保留分支，所以打回 Dev 而不是升级人。重试后 S-023 PASS。
 
-### PM 收尾
+### PM 收尾：check-harness.sh 真实运行
 
-全 PASS 后 PM 按顺序收尾：跑 check-harness.sh（harness 完整性）、模板残留体检（grep deliverables 有没有未替换的占位符）、board 更新到 AWAITING_ARCHIVE。抛 `[PM] 人工审批 2: ... 请审阅 deliverables/user-switch-stale-ui/`。
+全 PASS 后 PM 按顺序收尾：跑 check-harness.sh 校验 harness 自身完整性、模板残留体检（grep deliverables 有没有未替换的占位符）、board 更新到 AWAITING_ARCHIVE。check-harness.sh 是真实跑的，输出如下（节选）：
+
+```
+$ bash .harness/scripts/check-harness.sh
+=== check-harness.sh 系统完整性校验 ===
+[1] 顶层入口
+  [PASS] AGENTS.md 项目入口  [PASS] CLAUDE.md 起始上下文  [PASS] GUIDE.md 工作流总览
+[2] 7 个角色定义（含 PM）
+  [PASS] agent: project-manager  ...  [PASS] agent: test-engineer
+[3] 角色契约五要素（每个 agent 内嵌）
+  [PASS] project-manager: 身份宣言 / 输入 / 输出 / 禁止事项 / 完成条件
+  ...（7 个角色 × 5 要素全 PASS）
+[4] workflow 三件套  [PASS] transitions.json / flow-definition.md / subagent-orchestration.md
+[5] scripts 硬门禁  [PASS] verify.sh / baseline.sh / check-harness.sh / init-task.sh ...（10 个）
+[6] deliverables 结构  [PASS] _template / _archive
+[7] codebase-guide 知识地图  [PASS] 6 子文档
+[8] specs / memory / board  [PASS] _index / entries / templates
+=== 汇总 ===
+通过 71 | 失败 0
+结论: check-harness.sh PASS（Harness 完整）
+[exit code: 0]
+```
+
+71 项全 PASS，退出码 0。这一步的意义是：harness 自己也会腐化（有人删了脚本、改了 agent 契约忘了同步），check-harness 是元检查，保证 harness 本身可用。
+
+PM 抛 `[PM] 人工审批 2: ... 请审阅 deliverables/user-switch-stale-ui/`。
 
 ### 人工卡点 2 + 归档
 
-人审全量 deliverables 确认后运行 `/harness-archive`。PM 执行：Spec Merge（把本次 delta 合并进 `specs/i18n/spec.md`——下面是合并后的真实 spec，能看到 R-012 这条新 Requirement 被追加进 i18n capability）：
+人审全量 deliverables 确认后归档。PM 执行 Spec Merge（把本次 delta 合并进 `specs/i18n/spec.md`——R-012 这条新 Requirement 被追加进 i18n capability）：
 
 ```markdown
 ### Requirement: 换号登录保留当前界面语言
@@ -710,9 +767,11 @@ TE 的 test-report.md 里失败详情写得很完整（真实产出）：
 > 注：本 Requirement 由 user-switch-stale-ui 任务引入（修正原 res.uiLanguage || 'zh' 覆盖访客语言的缺陷）。
 ```
 
-接着 Memory Merge（可复用经验写进 memory/entries/，这个任务的"换号登录语言覆盖缺陷"就成了一个 pitfall 条目）、证据预检加 mv 归档（deliverables/<task> → _archive/<日期-任务名>/）、board → DONE、check-harness.sh 终检。
+接着 Memory Merge（"换号登录语言覆盖缺陷"写进 `memory/entries/` 成为一个 pitfall 条目）、证据预检加 mv 归档（deliverables/<task> → _archive/<日期-任务名>/）、board → DONE、check-harness.sh 终检。
 
-整个流程跑下来，一个模糊的"换号后语言不对"bug，被拆成了：明确的 R-012 需求（含正反两个 Scenario）→ 有 Non-Goals 钉死范围的设计 → 独立 RR 评审 → Dev 实现 + hook 程序验证 → CR 六维度审查 → TE 从 Scenario 生成 E2E + 证据闭环 → 一次实现级 FAIL 回退闭环 → 归档进 specs 和 memory。每一步都有文档产出、每一步都有可验证的退出码或 `## 结论`。这就是"把完成与否变成可检查的客观成果"在一个真实任务上的样子。
+### 小结
+
+整个流程跑下来，一个模糊的"换号后语言不对"bug，被拆成了：明确的 R-012 需求（含正反两个 Scenario）→ 有 Non-Goals 钉死范围的设计 → 独立 RR 评审 → Dev 实现 + hook 程序验证 → CR 六维度审查 → TE 从 Scenario 生成 E2E + 证据闭环 → 一次实现级 FAIL 回退闭环 → 归档进 specs 和 memory。每一步都有文档产出、每一步都有可验证的退出码或 `## 结论`。其中 hook 和脚本的输出是真实终端跑出来的——hook 在 Dev 自报 `exit_code:0` 时仍给出 `verdict=FAIL`，check-harness 71 项全 PASS 退出码 0，这就是"把完成与否变成可检查的客观成果"在一个真实任务上的样子。
 
 ---
 
@@ -742,7 +801,7 @@ RR 是开发前的独立可行性把关，standard 和 refactor 档需要它。�
 
 ## 十一、这套工程拦住了什么
 
-回过头看，这套工程是对着 agent 那几类失控一个个堵出来的。课程"为什么需要 Harness Engineering"那页把失控模式列得很清楚——虚报进展、约束规避、降低标准、上下文失忆、跳过步骤、伪造验证、错误死磕、小题大做。下表把每一类失控对应到 harness 里拦它的手段：
+回过头看，这套工程是对着 agent 那几类失控一个个堵出来的。失控模式列得很清楚——虚报进展、约束规避、降低标准、上下文失忆、跳过步骤、伪造验证、错误死磕、小题大做。下表把每一类失控对应到 harness 里拦它的手段：
 
 ![为什么需要 Harness Engineering：八类失控模式](images/p227_why-harness-failure-modes.png)
 
@@ -765,7 +824,7 @@ RR 是开发前的独立可行性把关，standard 和 refactor 档需要它。�
 
 ## 十二、怎么落地：成熟度路径
 
-如果想在自家项目上试这套思路，有一条渐进路径，不要一步到位铺满四层。课程给了 Harness 成熟度模型，可以对着定位自己在哪一级：
+如果想在自家项目上试这套思路，有一条渐进路径，不要一步到位铺满四层。Harness 成熟度模型可以帮你定位自己在哪一级：
 
 | 等级 | 描述 | 特征 |
 |---|---|---|
@@ -807,4 +866,4 @@ harness engineering 的关键点就一句话：**把"是否完成"从 agent 的�
 
 每一层都不是灵丹妙药，单看都是常识。但叠在一起，agent 就从"一个会写代码的聊天框"变成了"一个需要工程设施的执行节点"。它没有太多偷懒空间——因为交付不靠它说了什么，靠脚本检查。
 
-这不是终点。课程里提到一个判断：为当前模型写下的指令，可能在未来模型上变成限制；为弥补旧模型限制而设计的 Hook，当限制消失，它就变成额外负担——配置不是一次性资产，模型能力演进后，旧约束可能变成负担，要每 3-6 个月审查一次、重大模型发布后移除新模型已不需要的旧约束。换句话说，harness 的一部分会随着模型变强而简化，但"把完成与否变成可检查的客观成果"这个核心判断不会过时——模型再强，你也需要独立验证它说的是不是真的。这是工程思维，不是模型思维。
+这不是终点。有一个判断值得记下：为当前模型写下的指令，可能在未来模型上变成限制；为弥补旧模型限制而设计的 Hook，当限制消失，它就变成额外负担——配置不是一次性资产，模型能力演进后，旧约束可能变成负担，要每 3-6 个月审查一次、重大模型发布后移除新模型已不需要的旧约束。换句话说，harness 的一部分会随着模型变强而简化，但"把完成与否变成可检查的客观成果"这个核心判断不会过时——模型再强，你也需要独立验证它说的是不是真的。这是工程思维，不是模型思维。
