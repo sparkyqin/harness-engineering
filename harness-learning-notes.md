@@ -329,6 +329,18 @@ Rules 是注入到 agent 上下文的自然语言指令，声明"应该做什么
 
 但 Rules 有一个绕不开的弱点：**遵循率随上下文增长而衰减，是软约束，没有反馈闭环**——Rule 只是软约束，AI 会忽略（局部遗忘），也会绕过（找理由合理化违规）。所以它只能是第一层，下面要有兜底。
 
+### 双 IDE 落位：为什么 `.claude/` 下没有 rules
+
+上面讲的是 Cursor 视角——`.cursor/rules/*.mdc` 用 `globs` 和 `alwaysApply` 控制作用域，是 Cursor 原生的规则层。这套 kit 同时适配 Claude Code，但 Claude Code 没有 `.claude/rules` 这个约定，它的"常驻上下文"机制是 **`CLAUDE.md`**（会话启动自动读取）。所以同一套规则内容在两套 IDE 里落在不同载体上，`.claude/` 下故意不放 `rules`：
+
+| `.cursor/rules/` | → Claude Code 等价载体 | 作用域机制 |
+|---|---|---|
+| `harness-core.mdc`（`alwaysApply: true`，核心三步验证 + 七条铁律） | `CLAUDE.md`（三个铁律 / 七条铁律 / 核心三步验证都在里面） | always-on，会话启动即加载 |
+| `code-standards.mdc`（glob `src/**/*.{js,jsx,ts,tsx}`） | `.claude/skills/code-standards/SKILL.md`（正文近乎 1:1） | 按需触发，编辑源码时加载 |
+| `workflow-discipline.mdc`（glob 命令 + deliverables） | `.claude/skills/workflow-discipline/SKILL.md`（正文近乎 1:1） | 按需触发，改工作流时加载 |
+
+划分逻辑很清楚：`alwaysApply` 的核心铁律在 Claude Code 侧并入 `CLAUDE.md`——因为 `CLAUDE.md` 本身就是 always-on，等价于 Cursor 的常驻 rule，再单开一个 `rules/` 反而重复烧上下文；两个 glob 限定的领域规则则下沉成 `.claude/skills/`，靠 frontmatter 的 `description` / `paths` 按需触发（正是第 2 层要讲的渐进式披露），不常驻。换句话说，"Rules 层"在 Claude Code 侧没有消失，只是按"核心规则进 `CLAUDE.md`、领域规则进 `skills`"重新落位——这和第 3 节末尾说的"`.cursor/` 和 `.claude/` + `.harness/` 是等价两套"是同一件事的细化：不照搬 `.cursor/` 的目录结构，而是按 Claude Code 自身的约定重新落位（rules → `CLAUDE.md` + `skills/`，hooks → `settings.json` + `.harness/hooks/*.cjs`，agents → `.claude/agents/*.md`）。`.claude/` 下没有 `rules` 是这个适配的一部分，不是遗漏。
+
 ## 五、第 2 层：Skills——把固定步骤固化成 SOP
 
 Rules 声明"该做什么"，Skills 说"怎么做"。区别用一个例子讲最清楚：Rule 说"所有 API handler 必须用 Zod 校验输入"（定义 What），Skill 说"Step1 npm test → Step2 后台启动 server → Step3 curl /api/health 冒烟 → Step4 前端 build"（定义 How）。
