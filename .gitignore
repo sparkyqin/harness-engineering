@@ -11,3 +11,7 @@ Thumbs.db
 *.swo
 
 # 子目录各自维护更细的规则（见 harness-engineering-kit/.gitignore）
+
+# 平台开发临时验证目录
+.scratch/
+.probe/

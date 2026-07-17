@@ -1,0 +1,15 @@
+# Harness Platform — .gitignore
+
+# 依赖
+node_modules/
+
+# 构建产物(create-harness.exe 由 bun --compile 生成,templates-bundle 由 gen-bundle 生成)
+create-harness
+create-harness.exe
+create-harness-*.exe
+core/templates-bundle.js
+
+# 临时/测试
+.scratch/
+.probe/
+*.log

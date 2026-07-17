@@ -1,0 +1,10 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": ["AGENTS.md", "GUIDE.md", ".harness/codebase-guide/*.md"],
+  "permission": {
+    "edit": "ask",
+    "bash": "ask",
+    "write": "ask"
+  },
+  "_note": "instructions 把 AGENTS.md/GUIDE.md/codebase-guide 注入 agent 上下文。permission 默认 ask(harness 不自动放行写/bash,符合'交付靠客观成果'而非'agent 想做就做')。hooks 由 .opencode/plugins/harness-hooks.ts 提供(自动加载),无需在此声明。agent 定义在 .opencode/agents/,command 在 .opencode/commands/,均引用 IDE 无关的 .harness/ 契约。"
+}

@@ -1,0 +1,30 @@
+{
+  "name": "harness-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "开箱即用的 Harness 套件生成平台:读项目 → 生成适配的 harness → Claude Code/OpenCode 可用",
+  "type": "module",
+  "scripts": {
+    "detect": "node core/detect/index.js",
+    "scaffold": "node core/scaffold/index.js",
+    "fill": "node core/fill/index.js",
+    "generate": "node core/cli.js",
+    "generate:raw": "node core/index.js",
+    "validate": "node core/validate/index.js",
+    "typecheck": "tsc --noEmit",
+    "wizard": "node core/wizard.js",
+    "start": "node core/wizard.js",
+    "gen-bundle": "node scripts/gen-bundle.js",
+    "build:exe": "node scripts/gen-bundle.js && bun build core/wizard.js --compile --outfile create-harness"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@clack/prompts": "^1.7.0"
+  },
+  "bin": {
+    "create-harness": "core/wizard.js"
+  }
+}

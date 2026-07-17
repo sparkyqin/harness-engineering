@@ -1,0 +1,7 @@
+{
+  "name": "harness-opencode-plugins",
+  "private": true,
+  "type": "module",
+  "description": "OpenCode plugin 依赖(harness-hooks.ts 用 node:fs 内置,无外部依赖;此文件供 bun install 初始化)",
+  "dependencies": {}
+}

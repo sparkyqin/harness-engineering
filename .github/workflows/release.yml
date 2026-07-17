@@ -1,0 +1,65 @@
+# 打包 create-harness.exe 并发 GitHub Release
+# 触发:推送 v* tag(如 v0.1.0)
+# 产物:Windows 单文件 exe(自带 Node runtime + templates bundle,生成阶段零 bash 依赖)
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write  # 发 release 需要
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: harness-platform
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3
+
+      - name: Install deps
+        run: bun install
+
+      - name: Generate templates bundle
+        run: node scripts/gen-bundle.js
+
+      - name: Compile exe
+        run: bun build core/wizard.js --compile --outfile create-harness
+
+      - name: Verify exe (param mode)
+        run: |
+          mkdir _verify
+          cd _verify
+          echo '{"name":"verify","type":"module","dependencies":{"express":"^4"}}' > package.json
+          mkdir routes
+          echo "const e=require('express'); e().use('/api',require('./routes')); module.exports=e();" > server.js
+          echo "module.exports=require('express').Router();" > routes/r.js
+          ../create-harness.exe . L2 claude opencode
+          bash .harness/scripts/check-harness.sh
+
+      - name: Rename with platform
+        run: |
+          mv create-harness.exe create-harness-windows-x64.exe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: create-harness-windows-x64
+          path: harness-platform/create-harness-windows-x64.exe
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: harness-platform/create-harness-windows-x64.exe
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-rc') }}

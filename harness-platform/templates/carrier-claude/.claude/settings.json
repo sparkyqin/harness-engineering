@@ -1,0 +1,32 @@
+{
+  "hooks": {
+    "SubagentStop": [
+      {
+        "matcher": "developer",
+        "hooks": [{ "type": "command", "command": "node .harness/hooks/verify-after-developer.cjs", "timeout": 120000 }]
+      },
+      {
+        "matcher": "test-engineer",
+        "hooks": [{ "type": "command", "command": "node .harness/hooks/tester-evidence.cjs", "timeout": 180000 }]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [{ "type": "command", "command": "node .harness/hooks/format-on-edit.cjs" }]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [{ "type": "command", "command": "node .harness/hooks/guard-dangerous.cjs" }]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [{ "type": "command", "command": "echo '[SessionStart] Harness 上下文已加载: AGENTS.md / CLAUDE.md / GUIDE.md'" }]
+      }
+    ]
+  },
+  "_note": "Claude Code hooks 事件:PreToolUse(工具前,matcher 过滤) / PostToolUse(工具后) / SubagentStop(子代理停止,matcher 匹配 .claude/agents/<name>.md 的 name) / SessionStart。hook 脚本已适配 Claude Code 协议(agent_type / hookSpecificOutput.additionalContext)。对照 OpenCode 的 .opencode/plugins/harness-hooks.ts(tool.execute.before/after + session.created)。hook 用 .cjs 后缀:项目根常有 \"type\":\"module\",.js 会被当 ESM 加载致 require 报错、硬门禁静默全坏;.cjs 强制 CommonJS,与项目 ESM 设置无关。"
+}
