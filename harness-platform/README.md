@@ -1,16 +1,6 @@
 # Harness Platform
 
-> 开箱即用的交互式 CLI,读你的项目 → 生成适配该项目的 Harness 套件 → 在 Claude Code / OpenCode 下可用。
->
-> `Agent = Model + Harness`。模型决定上限,Harness 决定底线。本平台把"是否完成"从 Agent 的主观汇报,变成可检查的客观成果。
-
-## 这是什么
-
-一个交互式 CLI 工具,引导你为自己的项目生成一套 Harness 工程设施(四层防线:Rules → Skills → Agents+Workflow → Scripts)。**CLI 是一次性生成器**:跑完把套件写进项目仓库就退场,后续在 agent 里跑 `/harness-propose`。
-
-- **静态骨架确定**:四层防线、七角色契约、状态机、脚本框架——通用部分开箱即用,不依赖模型。
-- **AI 填项目特异**:codebase-guide 知识地图、verify.sh 检查项、dev-recipes——AI 读你的项目填(可选;无 AI key 退化为静态基线,Level 1-2 仍可用)。
-- **双 agent 适配**:Claude Code(`.claude/`)+ OpenCode(`.opencode/`),共用 IDE 无关的 `.harness/` 核心。
+> 平台介绍、exe 下载与完整用法见[根 README](../README.md#harness-套件生成平台)。本文件聚焦开发者关心的源码运行、目录结构、打包与实现细节。
 
 ## 状态
 
@@ -46,75 +36,18 @@ harness-platform/
 
 ## 快速使用
 
-### 方式一:下载 exe(开箱即用,免装 Node)
+👉 平台介绍、exe 下载与完整用法见[根 README](../README.md#harness-套件生成平台)。本文件聚焦开发者关心的源码运行与打包。
 
-👉 **[下载 create-harness-windows-x64.exe](https://github.com/sparkyqin/harness-engineering/releases/latest)**(v0.1.0,94MB)
-
-单文件,自带 Node runtime + 65 个模板,生成阶段零 bash 依赖。两种用法:
-
-```bash
-# A. 交互向导(推荐,双击或无参运行):5 步引导选目录/Level/agent/AI/预览
-create-harness-windows-x64.exe
-
-# B. 参数式(脚本/CI):一条命令直接生成
-create-harness-windows-x64.exe <你的项目目录> L3 claude opencode
-
-# 带 AI 填特异(智谱 GLM-5.2 实测可用):
-create-harness-windows-x64.exe ./myproj L3 claude opencode --ai \
-  --base=https://open.bigmodel.cn/api/paas/v4/chat/completions \
-  --model=glm-5.2 --key=<你的key>
-```
-
-无 LLM key 也能跑(纯静态基线,L1-L2 完整可用)。
-
-### 方式二:从源码跑(需 Node ≥20 或 Bun)
+### 从源码跑(需 Node ≥20 或 Bun)
 
 ```bash
 cd harness-platform
-node core/wizard.js [项目目录]      # 交互向导
-node core/cli.js <目录> L3 claude opencode   # 参数式
+node core/wizard.js [项目目录]              # 交互向导(或 npm start)
+node core/cli.js <目录> L3 claude opencode  # 参数式(脚本/CI)
+node core/cli.js <目录> L2 claude opencode --ai --mock   # 无 key 验证 fill 管线
 ```
 
-### 生成后(CLI 退场,在 agent 里跑)
-
-CLI 一次性生成套件写进项目仓库就退出。后续在 agent 里:
-
-```bash
-cd <你的项目目录>
-claude          # 或 opencode
-/harness-propose <任务名> [需求描述]   # 需求→方案→评审→[人工卡点1]
-/harness-apply   <任务名>              # 开发→审查→测试→[人工卡点2]
-/harness-archive <任务名>              # Spec Merge + 归档 + board DONE
-```
-
-LLM provider 配置详见 [docs/llm-providers.md](docs/llm-providers.md)。
-
-### 交互式向导(推荐,给人用)
-
-```bash
-node core/wizard.js [项目目录]
-# 或 npm start
-```
-
-5 步引导:选目录 → 选 Level/agent → AI 开关(+LLM 配置)→ 预览 → 生成自检。无 LLM key 也能跑(静态基线)。
-
-**参数式(给脚本/CI)**:
-
-```bash
-# 纯静态(无 LLM)
-node core/cli.js <项目目录> L2 claude opencode
-
-# AI 填特异(智谱 GLM-5.2 实测可用)
-node core/cli.js <项目目录> L2 claude opencode --ai \
-  --base=https://open.bigmodel.cn/api/paas/v4/chat/completions \
-  --model=glm-5.2 --key=<你的key>
-
-# 无 key 验证 fill 管线(合成数据)
-node core/cli.js <项目目录> L2 claude opencode --ai --mock
-```
-
-**生成后**:CLI 退场。在项目里启动 agent,跑 `/harness-propose <任务名>` → `/harness-apply` → `/harness-archive`。
-LLM provider 配置详见 [docs/llm-providers.md](docs/llm-providers.md)。
+参数式选项:`--ai --base=URL --model=NAME --key=KEY --mock`。无 key 时 fill 跳过,生成静态基线。LLM provider 配置详见 [docs/llm-providers.md](docs/llm-providers.md)。
 
 ## CLI 与 agent 的关系
 
