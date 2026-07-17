@@ -46,17 +46,28 @@ harness-platform/
 
 ## 快速使用
 
-**下载 exe(开箱即用,免装 Node)**:
+### 方式一:下载 exe(开箱即用,免装 Node)
 
-从 [Releases](../../releases) 下载 `create-harness-windows-x64.exe`,双击即跑交互向导;或命令行参数式:
+👉 **[下载 create-harness-windows-x64.exe](https://github.com/sparkyqin/harness-engineering/releases/latest)**(v0.1.0,94MB)
+
+单文件,自带 Node runtime + 65 个模板,生成阶段零 bash 依赖。两种用法:
 
 ```bash
+# A. 交互向导(推荐,双击或无参运行):5 步引导选目录/Level/agent/AI/预览
+create-harness-windows-x64.exe
+
+# B. 参数式(脚本/CI):一条命令直接生成
 create-harness-windows-x64.exe <你的项目目录> L3 claude opencode
+
+# 带 AI 填特异(智谱 GLM-5.2 实测可用):
+create-harness-windows-x64.exe ./myproj L3 claude opencode --ai \
+  --base=https://open.bigmodel.cn/api/paas/v4/chat/completions \
+  --model=glm-5.2 --key=<你的key>
 ```
 
-单文件 ~98MB,自带 Node runtime + 模板。生成阶段零 bash 依赖(.sh 脚本留给 agent 运行时执行,agent 生态自带 bash)。
+无 LLM key 也能跑(纯静态基线,L1-L2 完整可用)。
 
-**或从源码跑(需 Node ≥20 或 Bun)**:
+### 方式二:从源码跑(需 Node ≥20 或 Bun)
 
 ```bash
 cd harness-platform
@@ -64,7 +75,21 @@ node core/wizard.js [项目目录]      # 交互向导
 node core/cli.js <目录> L3 claude opencode   # 参数式
 ```
 
-**交互式向导(推荐,给人用)**:
+### 生成后(CLI 退场,在 agent 里跑)
+
+CLI 一次性生成套件写进项目仓库就退出。后续在 agent 里:
+
+```bash
+cd <你的项目目录>
+claude          # 或 opencode
+/harness-propose <任务名> [需求描述]   # 需求→方案→评审→[人工卡点1]
+/harness-apply   <任务名>              # 开发→审查→测试→[人工卡点2]
+/harness-archive <任务名>              # Spec Merge + 归档 + board DONE
+```
+
+LLM provider 配置详见 [docs/llm-providers.md](docs/llm-providers.md)。
+
+### 交互式向导(推荐,给人用)
 
 ```bash
 node core/wizard.js [项目目录]
